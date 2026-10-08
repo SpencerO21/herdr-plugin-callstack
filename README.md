@@ -1,5 +1,7 @@
 # Call stacks for Herdr
 
+Built based off of this bb plugin https://github.com/ebg1223/bb-plugin-callstack
+
 A Rust and Ratatui plugin that shows agent-supplied call flows in a terminal pane.
 A call flow is a tree of function calls. Each call can show its source location,
 types, conditions, and change label. The plugin does not record a running program.
