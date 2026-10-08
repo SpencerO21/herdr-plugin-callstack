@@ -1,0 +1,68 @@
+{
+  "name": "3. Refund (large sample)",
+  "status": "current",
+  "description": "Synthetic refund flow. Receipt storage and notifications are shared with checkout. Version selects each flow's context.",
+  "types": {
+    "Receipt": "{ id: string, status: 'charged' | 'refunded' }",
+    "Event": "{ kind: 'refunded', payment: Receipt }"
+  },
+  "frames": [
+    {
+      "fn": "refund_order",
+      "loc": "examples/commerce-demo.mjs:59",
+      "in": "payment id",
+      "module": "Refunds",
+      "calls": [
+        {
+          "fn": "load_payment",
+          "loc": "examples/commerce-demo.mjs:64",
+          "out": "Receipt",
+          "module": "Storage"
+        },
+        {
+          "fn": "refund_payment",
+          "loc": "examples/commerce-demo.mjs:66",
+          "in": "Receipt",
+          "cond": "payment.settled",
+          "module": "Payments",
+          "calls": [
+            {
+              "fn": "store_receipt",
+              "loc": "examples/commerce-demo.mjs:27",
+              "in": "Receipt",
+              "module": "Storage"
+            },
+            {
+              "fn": "publish_event",
+              "loc": "examples/commerce-demo.mjs:29",
+              "in": "Event",
+              "module": "Events",
+              "calls": [
+                {
+                  "fn": "notify_customer",
+                  "loc": "examples/commerce-demo.mjs:33",
+                  "in": "Event",
+                  "module": "Notifications",
+                  "calls": [
+                    {
+                      "fn": "send_email",
+                      "loc": "examples/commerce-demo.mjs:37",
+                      "concurrent": true,
+                      "module": "Email"
+                    },
+                    {
+                      "fn": "send_sms",
+                      "loc": "examples/commerce-demo.mjs:38",
+                      "concurrent": true,
+                      "module": "SMS"
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

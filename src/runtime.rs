@@ -2,19 +2,18 @@ use crate::{
     host,
     model::Record,
     store::{Cache, Store},
-    ui::{Effect, Line, Screen, View},
+    ui::{Effect, View},
 };
 use anyhow::Result;
 use crossterm::{
-    cursor::{Hide, MoveTo, Show},
+    cursor::{Hide, Show},
     event::{self, DisableMouseCapture, EnableMouseCapture, Event},
-    execute, queue,
-    style::Print,
-    terminal::{self, Clear, ClearType, EnterAlternateScreen, LeaveAlternateScreen},
+    execute,
+    terminal::{self, EnterAlternateScreen, LeaveAlternateScreen},
 };
 use notify::{EventKind, RecursiveMode, Watcher};
 use std::{
-    io::{self, Write},
+    io,
     path::PathBuf,
     sync::{
         Arc,
@@ -151,34 +150,6 @@ fn job(effect: Effect, store: Store, tx: Sender<Message>) {
     });
 }
 
-fn paint(screen: &Screen, previous: &mut Vec<Line>, resized: bool) -> Result<()> {
-    let mut stdout = io::stdout().lock();
-    if resized {
-        queue!(stdout, Clear(ClearType::All))?;
-        previous.clear();
-    }
-    for (y, line) in screen.lines.iter().enumerate() {
-        if previous.get(y) == Some(line) {
-            continue;
-        }
-        queue!(stdout, MoveTo(0, y as u16), Clear(ClearType::CurrentLine))?;
-        if line.color != 0 && std::env::var_os("NO_COLOR").is_none() {
-            queue!(
-                stdout,
-                Print(format!("\x1b[{}m{}\x1b[0m", line.color, line.text))
-            )?;
-        } else {
-            queue!(stdout, Print(&line.text))?;
-        }
-    }
-    for y in screen.lines.len()..previous.len() {
-        queue!(stdout, MoveTo(0, y as u16), Clear(ClearType::CurrentLine))?;
-    }
-    stdout.flush()?;
-    *previous = screen.lines.clone();
-    Ok(())
-}
-
 pub fn view(store: Store, project: Option<PathBuf>) -> Result<()> {
     store.ensure_dir()?;
     let mut model = View::new(store.scope.clone(), project);
@@ -217,13 +188,19 @@ pub fn view(store: Store, project: Option<PathBuf>) -> Result<()> {
             }
         }
     });
-    let (mut width, mut height) = terminal::size()?;
-    let mut screen = model.render(width as usize, height as usize);
-    let mut previous = vec![];
-    paint(&screen, &mut previous, true)?;
+    let mut terminal =
+        ratatui::Terminal::new(ratatui::backend::CrosstermBackend::new(io::stdout()))?;
+    let colors = std::env::var_os("NO_COLOR").is_none();
+    let mut screen = model.render(0, 0);
+    terminal.draw(|frame| {
+        screen = model.render(
+            usize::from(frame.area().width),
+            usize::from(frame.area().height),
+        );
+        screen.draw(frame, colors);
+    })?;
     // No redraw timer. Sleep until input, a data update, or a worker result arrives.
     while let Ok(message) = rx.recv() {
-        let mut resized = false;
         match message {
             Message::Quit => break,
             Message::Data(data) => model.update(data),
@@ -232,11 +209,7 @@ pub fn view(store: Store, project: Option<PathBuf>) -> Result<()> {
                 model.busy = false;
                 model.message = result.unwrap_or_else(|e| format!("Error: {e}"));
             }
-            Message::Input(Event::Resize(w, h)) => {
-                width = w;
-                height = h;
-                resized = true;
-            }
+            Message::Input(Event::Resize(_, _)) => {}
             Message::Input(input) => {
                 // Release and motion events do not change this UI.
                 if matches!(&input, Event::Mouse(m) if matches!(m.kind, event::MouseEventKind::Up(_) | event::MouseEventKind::Moved | event::MouseEventKind::Drag(_)))
@@ -250,8 +223,13 @@ pub fn view(store: Store, project: Option<PathBuf>) -> Result<()> {
                 }
             }
         }
-        screen = model.render(width as usize, height as usize);
-        paint(&screen, &mut previous, resized)?;
+        terminal.draw(|frame| {
+            screen = model.render(
+                usize::from(frame.area().width),
+                usize::from(frame.area().height),
+            );
+            screen.draw(frame, colors);
+        })?;
     }
     Ok(())
 }

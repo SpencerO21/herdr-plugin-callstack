@@ -1,0 +1,17 @@
+{
+  "name": "Checkout (sample)",
+  "status": "proposed",
+  "description": "Synthetic example. No payment occurs. The checkout and retry flows share charge_card and save_result.",
+  "types": { "Order": "{ total: u32 }", "Charge": "{ accepted: bool }" },
+  "frames": [{
+    "fn": "submit_order", "loc": "examples/diagram-demo.rs:2", "in": "Order",
+    "calls": [
+      {
+        "fn": "charge_card", "loc": "examples/diagram-demo.rs:15", "in": "u32", "out": "Charge",
+        "cond": "total > 0", "change": "modified",
+        "calls": [{ "fn": "save_result", "loc": "examples/diagram-demo.rs:21", "change": "added" }]
+      },
+      { "fn": "send_receipt", "loc": "examples/diagram-demo.rs:19", "change": "removed", "note": "Proposed removal. This remains in the sample source." }
+    ]
+  }]
+}

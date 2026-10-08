@@ -1,0 +1,12 @@
+{
+  "name": "Retry (sample)",
+  "status": "current",
+  "description": "Synthetic retry flow. Click a shared function, then Version to inspect its occurrence in each flow.",
+  "frames": [{
+    "fn": "retry_payment", "loc": "examples/diagram-demo.rs:9", "in": "u32",
+    "calls": [{
+      "fn": "charge_card", "loc": "examples/diagram-demo.rs:15", "loop": "up to 3 attempts", "in": "u32",
+      "calls": [{ "fn": "save_result", "loc": "examples/diagram-demo.rs:21" }]
+    }]
+  }]
+}

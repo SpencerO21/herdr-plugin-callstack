@@ -1,0 +1,88 @@
+{
+  "name": "2. Payment retry (large sample)",
+  "status": "current",
+  "description": "Synthetic retry worker. The loop labels show queue processing and bounded attempts. Shared functions retain this flow's current version.",
+  "types": {
+    "Order": "{ id: string, total: number }",
+    "Receipt": "{ id: string, status: 'charged' | 'refunded' }",
+    "Risk": "{ accepted: boolean }",
+    "Event": "{ kind: 'charged' | 'refunded', order?: Order, payment?: Receipt }"
+  },
+  "frames": [
+    {
+      "fn": "retry_payments",
+      "loc": "examples/commerce-demo.mjs:49",
+      "module": "Worker",
+      "calls": [
+        {
+          "fn": "load_retry_queue",
+          "loc": "examples/commerce-demo.mjs:57",
+          "out": "Order[]",
+          "module": "Queue"
+        },
+        {
+          "fn": "process_payment",
+          "loc": "examples/commerce-demo.mjs:15",
+          "in": "Order",
+          "out": "Receipt",
+          "module": "Payments",
+          "calls": [
+            {
+              "fn": "risk_check",
+              "loc": "examples/commerce-demo.mjs:20",
+              "in": "Order",
+              "out": "Risk",
+              "module": "Risk"
+            },
+            {
+              "fn": "charge_card",
+              "loc": "examples/commerce-demo.mjs:22",
+              "in": "Order",
+              "out": "Receipt",
+              "cond": "risk.accepted",
+              "module": "Payments",
+              "calls": [
+                {
+                  "fn": "store_receipt",
+                  "loc": "examples/commerce-demo.mjs:27",
+                  "in": "Receipt",
+                  "module": "Storage"
+                },
+                {
+                  "fn": "publish_event",
+                  "loc": "examples/commerce-demo.mjs:29",
+                  "in": "Event",
+                  "module": "Events",
+                  "calls": [
+                    {
+                      "fn": "notify_customer",
+                      "loc": "examples/commerce-demo.mjs:33",
+                      "in": "Event",
+                      "module": "Notifications",
+                      "calls": [
+                        {
+                          "fn": "send_email",
+                          "loc": "examples/commerce-demo.mjs:37",
+                          "concurrent": true,
+                          "module": "Email"
+                        },
+                        {
+                          "fn": "send_sms",
+                          "loc": "examples/commerce-demo.mjs:38",
+                          "concurrent": true,
+                          "module": "SMS"
+                        }
+                      ]
+                    }
+                  ]
+                }
+              ]
+            }
+          ],
+          "loop": "each queued order; up to 3 attempts",
+          "cond": "temporary payment failure"
+        }
+      ]
+    }
+  ]
+}

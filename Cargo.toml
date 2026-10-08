@@ -1,6 +1,6 @@
 [package]
 name = "herdr-callstack"
-version = "0.4.0"
+version = "0.5.0"
 edition = "2024"
 rust-version = "1.88"
 description = "Mouse-controlled call flows for Herdr"
@@ -10,6 +10,7 @@ anyhow = "1.0"
 clap = { version = "4.6", features = ["derive", "env"] }
 crossterm = "0.29"
 notify = "8.2"
+ratatui = { version = "0.30.2", default-features = false, features = ["crossterm"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 sha2 = "0.10"

@@ -70,7 +70,20 @@ fn mouse(x: usize, y: usize) -> Event {
     })
 }
 fn click(view: &mut View, action: Action) -> Effect {
-    let screen = view.render(60, 25);
+    let mut screen = view.render(60, 25);
+    if !screen
+        .hits
+        .iter()
+        .any(|h| matches!(h.target, Target::Action(a) if a == action))
+    {
+        let more = screen
+            .hits
+            .iter()
+            .find(|h| matches!(h.target, Target::Action(Action::More)))
+            .unwrap();
+        view.event(mouse(more.x, more.y), &screen, Instant::now());
+        screen = view.render(60, 25);
+    }
     let hit = screen
         .hits
         .iter()
@@ -196,6 +209,69 @@ fn every_mouse_control_remains_available() {
     click(&mut v, Action::Delete);
     assert!(matches!(click(&mut v, Action::Confirm), Effect::Delete(name) if name == "B"));
     assert!(matches!(click(&mut v, Action::Quit), Effect::Quit));
+}
+
+#[test]
+fn details_keep_tree_visible_and_source_separate() {
+    let mut v = view();
+    click(&mut v, Action::Details);
+    let screen = v.render(80, 30);
+    assert!(
+        screen
+            .hits
+            .iter()
+            .any(|h| matches!(h.target, Target::Row(_)))
+    );
+    assert!(screen.lines.iter().any(|l| l.text.starts_with("DETAILS |")));
+    assert!(screen.lines.iter().any(|l| l.text.starts_with("Source: ")));
+    assert!(screen.lines.iter().any(|l| l.color == 7));
+    assert!(
+        !screen
+            .hits
+            .iter()
+            .any(|h| matches!(h.target, Target::Action(Action::Delete)))
+    );
+}
+
+#[test]
+fn details_wrap_at_words_and_preserve_long_names() {
+    use herdr_callstack::ui::wrap;
+    assert_eq!(
+        wrap("Open Diff dn to inspect", 12),
+        ["Open Diff dn", "to inspect"]
+    );
+    assert_eq!(wrap("abcdefghijk", 4), ["abcd", "efgh", "ijk"]);
+    assert_eq!(wrap("界界界", 4), ["界界", "界"]);
+}
+
+#[test]
+fn compact_layout_keeps_controls_and_footer_inside_pane() {
+    for width in [29, 36, 60, 100] {
+        for height in [16, 25, 40] {
+            for more in [false, true] {
+                for detail in [false, true] {
+                    let mut v = view();
+                    v.more = more;
+                    v.detail = detail;
+                    let screen = v.render(width, height);
+                    assert_eq!(screen.lines.len(), height);
+                    assert!(screen.lines[height - 3].text.starts_with("= same"));
+                    assert!(
+                        screen
+                            .hits
+                            .iter()
+                            .all(|h| h.end < width && h.y < height - 3)
+                    );
+                    assert!(
+                        screen
+                            .hits
+                            .iter()
+                            .any(|h| matches!(h.target, Target::Row(_)))
+                    );
+                }
+            }
+        }
+    }
 }
 
 #[test]

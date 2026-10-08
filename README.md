@@ -1,6 +1,6 @@
 # Call stacks for Herdr
 
-A Rust plugin that shows agent-supplied call flows in a terminal pane.
+A Rust and Ratatui plugin that shows agent-supplied call flows in a terminal pane.
 A call flow is a tree of function calls. Each call can show its source location,
 types, conditions, and change label. The plugin does not record a running program.
 
@@ -60,7 +60,9 @@ button or agent-refresh shortcut in this release.
 | Double-click a function, or Open nvim | o | Open the source line in a new Neovim pane |
 | Diff dn | g | Open the selected file's changes in DiffNav through `dn` |
 | Prev / Next | Shift+Tab / Tab | Change flows |
-| Details / Back | d | Show types, conditions, and notes |
+| Details / Hide details | d | Show types, conditions, and notes below the stack |
+| More / Back | m | Show or hide extra controls |
+| Tree / Diagram / Combined | 1 / 2 / 3 | Select the view |
 | Wheel, Up/Down, Page up/down | Arrows, PageUp/PageDown | Scroll |
 | Left / Right | Left/Right | Read long tree rows |
 | Expand all / Fold all | — | Change the whole tree |
@@ -71,11 +73,82 @@ button or agent-refresh shortcut in this release.
 The legend stays visible above the status line:
 `=` same, `+` added, `~` modified, and `-` removed.
 The boxed `[+]` and `[-]` controls fold calls; they are not change labels.
+
+The stack stays visible when you open Details. Click a call to read its details.
+The selected call has a highlighted row. Its source path appears below the tree.
+Source warnings have a separate status line. Extra controls, including Delete,
+are under **More**. The mouse wheel scrolls details while Details is open.
 Set `NO_COLOR=1` to disable colours. `[parallel]` marks calls that can start together.
 
 Buttons wrap in narrow panes. The full view needs at least 29 columns and 16 rows.
 Smaller panes show a resize message and a mouse-accessible Quit button.
 Terminal mouse handling and the normal screen are restored on exit.
+
+## Flow diagrams
+
+Click **Diagram** to show the selected flow as function boxes and arrows.
+Click **Combined** to show all saved flows in this session in one diagram.
+Click **Tree** to return to the nested call list. The diagrams need at least
+29 columns and 24 rows. A smaller pane keeps a Tree button available.
+
+- **Expanded** shows source locations, input/output types, conditions, and loops.
+  **Compact** uses smaller boxes. Press `z` to switch sizes.
+- Click a box to select it and show details below the diagram.
+- Double-click a box, or click **Open nvim**, to open its source.
+- Click **Diff dn** to open the selected version's file changes in DiffNav.
+- Use the mouse wheel to move vertically. Shift+wheel moves horizontally
+  when the terminal supplies the Shift modifier. Horizontal wheel events also work.
+- **More** has buttons for all movement directions, page movement, and **Center**.
+  Arrow keys move the diagram. `c` centers the selected box.
+- **Prev call** and **Next call** select and center boxes. Their keys are `p` and `n`.
+- **Version** cycles through a shared function's occurrences. Its key is `v`.
+  The details show the flow name, version number, and source location.
+- Move the wheel over the details to scroll them. **More** also has **Details up**
+  and **Details down** buttons. `d` shows or hides details.
+
+An arrow means that the parent calls the child. Dashed connectors mark conditions.
+Double-line connectors belong to multiple flows. A side connector marked `return`
+shows a backward or recursive link. Loop and parallel-call labels appear in boxes.
+The `╳` symbol marks crossing lines, not a connection. Select a function to
+highlight its incoming and outgoing connectors.
+The usual `=`, `+`, `~`, and `-` change markers remain visible without color.
+Mixed markers mean that flow versions have different change labels.
+
+The combined view joins functions by project folder, file path, and function name.
+Line numbers can differ. Same-name functions in different files stay separate.
+Functions without a source location stay within their own flow. This is a display
+rule, not symbol analysis: same-name functions within one file can still join.
+Use **Version** to inspect each occurrence. Source opening and deletion use that
+occurrence's flow. Delete still requires confirmation.
+
+The diagrams show the published call data. They do not run code or start an agent.
+Graph layout stays in memory. Drawing allocates only the visible diagram area.
+Changing sizes alters the box layout; it does not shrink the terminal font.
+
+To try the bundled sample, run these commands from this repository in Herdr:
+
+```sh
+./target/release/herdr-callstack publish examples/diagram-checkout.json --session diagram-demo
+./target/release/herdr-callstack publish examples/diagram-retry.json --session diagram-demo
+./target/release/herdr-callstack open --session diagram-demo
+```
+
+Click **Combined**, then **Expanded**. The sample code makes no real charges.
+
+For a larger example with 3 flows and 21 shared or distinct functions:
+
+```sh
+./target/release/herdr-callstack publish examples/commerce-checkout.json --session commerce-demo
+./target/release/herdr-callstack publish examples/commerce-retry.json --session commerce-demo
+./target/release/herdr-callstack publish examples/commerce-refund.json --session commerce-demo
+./target/release/herdr-callstack open --session commerce-demo
+```
+
+Use **Combined** and **Compact** for the overview. Scroll down to see the
+notification branches. Select `process_payment` or `publish_event`, then use
+**Version** to compare flow contexts. The example includes parallel checks,
+conditional calls, bounded retries, and proposed notification changes.
+All source functions are local stubs. They make no real payments or requests.
 
 ## Source locations
 
@@ -166,7 +239,9 @@ run it. New automation should use the Rust executable directly.
   reparse unchanged documents or redraw an idle screen.
 - Mouse input and rendering use memory snapshots. They do not read flow files.
 - The call tree is rebuilt only after a data, flow, or fold change.
-- The terminal writes only changed screen rows. There is no redraw timer.
+- Ratatui writes only changed terminal cells. There is no redraw timer.
+- Graph structure is rebuilt only when data or the view changes. Moving the
+  diagram reuses its layout. Changing size recalculates box positions only.
 - Invalid updates keep the last valid snapshot and show an error.
 - Herdr commands and flow deletion run outside the input loop.
 
@@ -197,6 +272,8 @@ cargo test --locked
 
 Tests cover record compatibility, input limits, concurrent publishing, cache
 reuse, file notifications, mouse controls, source paths, and command timeouts.
+Diagram tests cover Ratatui output, shared functions, cycles, source actions,
+version selection, narrow panes, Unicode text, and viewport-sized allocation.
 
 To measure cached rendering with your own flow data:
 

@@ -1,0 +1,129 @@
+{
+  "name": "1. Checkout (large sample)",
+  "status": "proposed",
+  "description": "Synthetic proposal. No real payment or message occurs. Stock and price checks run together. Notifications show an added SMS path and removal of the old path.",
+  "types": {
+    "Order": "{ id: string, total: number }",
+    "Receipt": "{ id: string, status: 'charged' | 'refunded' }",
+    "Risk": "{ accepted: boolean }",
+    "Event": "{ kind: 'charged' | 'refunded', order?: Order, payment?: Receipt }"
+  },
+  "frames": [
+    {
+      "fn": "submit_order",
+      "loc": "examples/commerce-demo.mjs:2",
+      "in": "Order",
+      "module": "Checkout",
+      "calls": [
+        {
+          "fn": "validate_order",
+          "loc": "examples/commerce-demo.mjs:8",
+          "in": "Order",
+          "module": "Validation",
+          "calls": [
+            {
+              "fn": "check_stock",
+              "loc": "examples/commerce-demo.mjs:12",
+              "concurrent": true,
+              "module": "Inventory"
+            },
+            {
+              "fn": "price_order",
+              "loc": "examples/commerce-demo.mjs:13",
+              "concurrent": true,
+              "module": "Pricing"
+            }
+          ]
+        },
+        {
+          "fn": "process_payment",
+          "loc": "examples/commerce-demo.mjs:15",
+          "in": "Order",
+          "out": "Receipt",
+          "module": "Payments",
+          "calls": [
+            {
+              "fn": "risk_check",
+              "loc": "examples/commerce-demo.mjs:20",
+              "in": "Order",
+              "out": "Risk",
+              "module": "Risk"
+            },
+            {
+              "fn": "charge_card",
+              "loc": "examples/commerce-demo.mjs:22",
+              "in": "Order",
+              "out": "Receipt",
+              "cond": "risk.accepted",
+              "module": "Payments",
+              "change": "modified",
+              "calls": [
+                {
+                  "fn": "store_receipt",
+                  "loc": "examples/commerce-demo.mjs:27",
+                  "in": "Receipt",
+                  "module": "Storage"
+                },
+                {
+                  "fn": "publish_event",
+                  "loc": "examples/commerce-demo.mjs:29",
+                  "in": "Event",
+                  "module": "Events",
+                  "calls": [
+                    {
+                      "fn": "notify_customer",
+                      "loc": "examples/commerce-demo.mjs:33",
+                      "in": "Event",
+                      "module": "Notifications",
+                      "calls": [
+                        {
+                          "fn": "send_email",
+                          "loc": "examples/commerce-demo.mjs:37",
+                          "concurrent": true,
+                          "module": "Email"
+                        },
+                        {
+                          "fn": "send_sms",
+                          "loc": "examples/commerce-demo.mjs:38",
+                          "concurrent": true,
+                          "module": "SMS",
+                          "change": "added"
+                        },
+                        {
+                          "fn": "legacy_notify",
+                          "loc": "examples/commerce-demo.mjs:39",
+                          "change": "removed",
+                          "note": "Proposed removal of the old notification path."
+                        }
+                      ]
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "fn": "create_shipment",
+          "loc": "examples/commerce-demo.mjs:41",
+          "in": "Order",
+          "cond": "payment accepted",
+          "module": "Shipping",
+          "calls": [
+            {
+              "fn": "reserve_stock",
+              "loc": "examples/commerce-demo.mjs:46",
+              "module": "Inventory"
+            },
+            {
+              "fn": "book_carrier",
+              "loc": "examples/commerce-demo.mjs:47",
+              "out": "tracking number",
+              "module": "Shipping"
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}
