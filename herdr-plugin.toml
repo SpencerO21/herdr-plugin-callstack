@@ -1,0 +1,27 @@
+id = "callstack"
+name = "Call stacks"
+version = "0.3.0"
+min_herdr_version = "0.9.1"
+description = "Inspect current and proposed call flows in a live terminal tree."
+platforms = ["macos", "linux"]
+
+[[build]]
+command = ["cargo", "build", "--release", "--locked", "--bin", "herdr-callstack"]
+
+[[actions]]
+id = "open"
+title = "Call stacks: open"
+contexts = ["workspace", "pane"]
+command = ["./target/release/herdr-callstack", "open"]
+
+[[panes]]
+id = "tree"
+title = "Call stacks"
+placement = "split"
+command = ["./target/release/herdr-callstack", "view"]
+
+[[panes]]
+id = "editor"
+title = "Call stack source"
+placement = "split"
+command = ["./target/release/herdr-callstack", "edit"]

@@ -1,0 +1,18 @@
+{
+  "name": "Submit order",
+  "description": "Example only. These files do not refer to your project.",
+  "status": "proposed",
+  "types": { "OrderDraft": "{ items: LineItem[] }", "Order": "{ id: string; total: number }" },
+  "frames": [
+    {
+      "fn": "submitOrder", "loc": "src/orders.ts:10", "in": "OrderDraft", "out": "Promise<Order>", "change": "modified",
+      "calls": [
+        { "fn": "validateItems", "in": "LineItem[]", "out": "void", "change": "added", "cond": "items.length > 0", "note": "Reject invalid items before storage." },
+        { "fn": "saveOrder", "in": "OrderDraft", "out": "Order", "module": "database" },
+        { "fn": "sendReceipt", "concurrent": true, "change": "same" },
+        { "fn": "recordMetrics", "concurrent": true, "change": "added", "detail": "These two calls can run at the same time." },
+        { "fn": "legacyAudit", "change": "removed" }
+      ]
+    }
+  ]
+}

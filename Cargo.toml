@@ -1,0 +1,23 @@
+[package]
+name = "herdr-callstack"
+version = "0.3.0"
+edition = "2024"
+rust-version = "1.88"
+description = "Mouse-controlled call flows for Herdr"
+
+[dependencies]
+anyhow = "1.0"
+clap = { version = "4.6", features = ["derive", "env"] }
+crossterm = "0.29"
+notify = "8.2"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+sha2 = "0.10"
+signal-hook = "0.3"
+time = { version = "0.3", features = ["formatting"] }
+unicode-width = "0.2"
+
+[profile.release]
+lto = true
+codegen-units = 1
+strip = true
