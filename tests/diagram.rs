@@ -12,6 +12,7 @@ use std::{
 
 fn record(name: &str, frames: serde_json::Value) -> Arc<Record> {
     Arc::new(Record {
+        archived: false,
         flow: serde_json::from_value::<Flow>(serde_json::json!({"name":name,"frames":frames}))
             .unwrap(),
         scope: Scope {

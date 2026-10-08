@@ -1,5 +1,7 @@
 use crate::graph::Graph;
-use crate::model::{Frame, Record, Scope, clean};
+use crate::host::AgentTarget;
+use crate::model::{Flow, Frame, Record, Scope, clean};
+use crate::panels::Panel;
 use crossterm::event::{Event, KeyCode, KeyEventKind, KeyModifiers, MouseButton, MouseEventKind};
 use ratatui::{
     buffer::Buffer,
@@ -21,6 +23,24 @@ pub enum Action {
     Next,
     Details,
     More,
+    Tools,
+    Search,
+    Focus,
+    Changes,
+    Preview,
+    Trace,
+    ClearTrace,
+    ClearFilters,
+    History,
+    Archive,
+    Lanes,
+    Generate,
+    UpdateFlow,
+    FindAgents,
+    SendGeneration,
+    PanelUp,
+    PanelDown,
+    PanelClear,
     Tree,
     Diagram,
     Combined,
@@ -54,6 +74,19 @@ pub enum Effect {
     Open(PathBuf, String),
     Diff(PathBuf, String),
     Delete(String),
+    Archive(String, bool),
+    Preview {
+        project: PathBuf,
+        loc: String,
+        key: String,
+    },
+    Agents(PathBuf),
+    Generate {
+        target: AgentTarget,
+        project: PathBuf,
+        subject: String,
+        flow: Option<Flow>,
+    },
 }
 #[derive(Clone, Debug)]
 pub struct Row {
@@ -67,6 +100,7 @@ pub enum Target {
     Row(usize),
     Fold(usize),
     Node(usize),
+    PanelItem(usize),
 }
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum Mode {
@@ -74,6 +108,12 @@ pub enum Mode {
     Tree,
     Diagram,
     Combined,
+    Lanes,
+}
+impl Mode {
+    pub fn is_combined(self) -> bool {
+        matches!(self, Self::Combined | Self::Lanes)
+    }
 }
 #[derive(Clone, Debug)]
 pub struct Hit {
@@ -135,6 +175,19 @@ impl Screen {
 }
 
 pub struct View {
+    pub all_records: Vec<Arc<Record>>,
+    pub history: bool,
+    pub focus_key: Option<(String, Vec<usize>)>,
+    pub changes_only: bool,
+    pub trace: Option<String>,
+    pub panel: Option<Panel>,
+    pub preview: bool,
+    pub preview_center: bool,
+    pub preview_lines: Vec<String>,
+    pub generation_subject: String,
+    pub generation_flow: Option<Flow>,
+    pub generation_project: Option<PathBuf>,
+    pub generation_target: Option<AgentTarget>,
     pub scope: Scope,
     pub records: Vec<Arc<Record>>,
     pub flow_name: Option<String>,
@@ -149,7 +202,7 @@ pub struct View {
     pub expanded: bool,
     pub camera: (usize, usize),
     graph_area: (usize, usize, usize),
-    center_graph: bool,
+    pub(crate) center_graph: bool,
     pub detail_offset: usize,
     pub offset: usize,
     pub horizontal: usize,
@@ -158,13 +211,26 @@ pub struct View {
     pub message: String,
     pub busy: bool,
     pub confirm: Option<String>,
-    folded: HashMap<String, HashSet<String>>,
+    pub(crate) folded: HashMap<String, HashSet<String>>,
     last_click: Option<(String, Instant)>,
 }
 
 impl View {
     pub fn new(scope: Scope, project: Option<PathBuf>) -> Self {
         Self {
+            all_records: vec![],
+            history: false,
+            focus_key: None,
+            changes_only: false,
+            trace: None,
+            panel: None,
+            preview: false,
+            preview_center: false,
+            preview_lines: vec![],
+            generation_subject: String::new(),
+            generation_flow: None,
+            generation_project: None,
+            generation_target: None,
             scope,
             records: vec![],
             flow_name: None,
@@ -233,7 +299,7 @@ impl View {
                 .map(|o| o.record.as_ref())
         }
     }
-    fn rebuild_graph(&mut self) {
+    pub(crate) fn rebuild_graph(&mut self) {
         if self.mode == Mode::Tree {
             return;
         }
@@ -251,12 +317,11 @@ impl View {
         let records: Vec<_> = self
             .records
             .iter()
-            .filter(|r| {
-                self.mode == Mode::Combined || Some(&r.flow.name) == self.flow_name.as_ref()
-            })
+            .filter(|r| self.mode.is_combined() || Some(&r.flow.name) == self.flow_name.as_ref())
             .cloned()
             .collect();
-        self.graph = Graph::build(&records, self.mode == Mode::Combined, self.expanded);
+        self.graph = Graph::build(&records, self.mode.is_combined(), self.expanded);
+        self.filter_graph();
         self.graph_selected = self
             .graph
             .nodes
@@ -279,8 +344,15 @@ impl View {
         self.center_graph = true;
     }
     pub fn update(&mut self, records: Vec<Arc<Record>>) {
+        let preview_key = self.preview_key();
         let previous = self.flow_name.clone();
-        self.records = records;
+        self.all_records = records;
+        self.records = self
+            .all_records
+            .iter()
+            .filter(|r| r.archived == self.history)
+            .cloned()
+            .collect();
         if !self
             .records
             .iter()
@@ -296,6 +368,16 @@ impl View {
         self.last_click = None;
         self.rebuild();
         self.rebuild_graph();
+        if preview_key != self.preview_key() {
+            self.preview = false;
+        }
+        if self
+            .panel
+            .as_ref()
+            .is_some_and(|p| p.kind == crate::panels::PanelKind::Search)
+        {
+            self.search_items();
+        }
     }
     pub fn rebuild(&mut self) {
         fn walk(
@@ -321,13 +403,32 @@ impl View {
         let mut rows = vec![];
         if let Some(record) = self.record() {
             let empty = HashSet::new();
-            let set = self.folded.get(&record.flow.name).unwrap_or(&empty);
+            let set = if self.focus_key.is_some() || self.changes_only {
+                &empty
+            } else {
+                self.folded.get(&record.flow.name).unwrap_or(&empty)
+            };
             walk(&record.flow.frames, &mut vec![], set, &mut rows);
         }
         self.rows = rows;
+        self.filter_rows();
         self.selected = self.selected.min(self.rows.len().saturating_sub(1));
     }
     pub fn action(&mut self, action: Action) -> Effect {
+        if matches!(
+            action,
+            Action::NodeNext
+                | Action::NodePrev
+                | Action::Version
+                | Action::Tree
+                | Action::Diagram
+                | Action::Combined
+        ) {
+            self.preview = false;
+        }
+        if let Some(effect) = self.explore_action(action) {
+            return effect;
+        }
         if !matches!(action, Action::Confirm | Action::Delete) {
             self.confirm = None;
         }
@@ -335,7 +436,7 @@ impl View {
             Action::DetailUp => self.detail_offset = self.detail_offset.saturating_sub(3),
             Action::DetailDown => self.detail_offset = self.detail_offset.saturating_add(3),
             Action::Tree | Action::Diagram | Action::Combined => {
-                if self.mode == Mode::Combined && action != Action::Combined {
+                if self.mode.is_combined() && action != Action::Combined {
                     self.flow_name = self.selected_record().map(|r| r.flow.name.clone());
                     self.selected = 0;
                     self.offset = 0;
@@ -354,6 +455,9 @@ impl View {
             Action::Size => {
                 self.expanded = !self.expanded;
                 self.graph.layout(self.expanded);
+                if self.mode == Mode::Lanes {
+                    self.graph.layout_lanes(self.expanded);
+                }
                 self.center_graph = true;
             }
             Action::Center => self.center_graph = true,
@@ -405,7 +509,9 @@ impl View {
             Action::Cancel => self.more = false,
             Action::Quit => return Effect::Quit,
             Action::Prev | Action::Next if !self.records.is_empty() => {
-                if self.mode == Mode::Combined {
+                self.preview = false;
+                self.focus_key = None;
+                if self.mode.is_combined() {
                     self.mode = Mode::Diagram;
                 }
                 let index = self
@@ -433,7 +539,8 @@ impl View {
                 self.rebuild_graph();
             }
             Action::Details => {
-                self.detail = !self.detail;
+                self.detail = self.preview || !self.detail;
+                self.preview = false;
                 self.detail_offset = 0;
             }
             Action::Fold => {
@@ -534,6 +641,12 @@ impl View {
         Effect::None
     }
     pub fn event(&mut self, event: Event, screen: &Screen, now: Instant) -> Effect {
+        if self.panel.is_some() {
+            if matches!(&event, Event::Key(key) if key.kind == KeyEventKind::Release) {
+                return Effect::None;
+            }
+            return self.panel_event(&event, screen);
+        }
         match event {
             Event::Key(key) if key.kind != KeyEventKind::Release => {
                 let action = match key.code {
@@ -545,6 +658,14 @@ impl View {
                     KeyCode::Char('g') => Some(Action::Diff),
                     KeyCode::Char('d') => Some(Action::Details),
                     KeyCode::Char('m') => Some(Action::More),
+                    KeyCode::Char('/') => Some(Action::Search),
+                    KeyCode::Char('t') => Some(Action::Tools),
+                    KeyCode::Char('f') => Some(Action::Focus),
+                    KeyCode::Char('x') => Some(Action::Changes),
+                    KeyCode::Char('s') => Some(Action::Preview),
+                    KeyCode::Char('4') => Some(Action::Lanes),
+                    KeyCode::Char('h') => Some(Action::History),
+                    KeyCode::Char('r') => Some(Action::UpdateFlow),
                     KeyCode::Char('1') => Some(Action::Tree),
                     KeyCode::Char('2') => Some(Action::Diagram),
                     KeyCode::Char('3') => Some(Action::Combined),
@@ -618,6 +739,7 @@ impl View {
                 });
                 match hit.map(|h| &h.target) {
                     Some(Target::Node(index)) => {
+                        self.preview = false;
                         self.confirm = None;
                         if self.graph_selected != *index {
                             self.version = 0;
@@ -639,11 +761,13 @@ impl View {
                         return self.action(*a);
                     }
                     Some(Target::Fold(i)) => {
+                        self.preview = false;
                         self.selected = *i;
                         self.last_click = None;
                         return self.action(Action::Fold);
                     }
                     Some(Target::Row(i)) => {
+                        self.preview = false;
                         self.selected = *i;
                         self.detail_offset = 0;
                         self.confirm = None;
@@ -660,7 +784,7 @@ impl View {
                         }
                         self.last_click = Some((id, now));
                     }
-                    None => self.last_click = None,
+                    None | Some(Target::PanelItem(_)) => self.last_click = None,
                 }
             }
             _ => {}
@@ -670,6 +794,9 @@ impl View {
 
     pub fn render(&mut self, width: usize, height: usize) -> Screen {
         let width = width.saturating_sub(1);
+        if self.panel.is_some() && width >= 28 && height >= 16 {
+            return self.render_panel(width, height);
+        }
         let mut screen = Screen {
             lines: vec![],
             hits: vec![],
@@ -750,6 +877,7 @@ impl View {
         } else if self.more {
             vec![
                 ("Back", Action::More),
+                ("Tools", Action::Tools),
                 ("Fold", Action::Fold),
                 ("Expand all", Action::Expand),
                 ("Fold all", Action::Collapse),
@@ -779,6 +907,7 @@ impl View {
                 ("More", Action::More),
                 ("Diagram", Action::Diagram),
                 ("Combined", Action::Combined),
+                ("Tools", Action::Tools),
             ]
         };
         let mut line = String::new();
@@ -878,7 +1007,20 @@ impl View {
                         .map(|(k, v)| format!("type {k}: {v}")),
                 );
             }
-            let wrapped: Vec<_> = raw.iter().flat_map(|s| wrap(s, width)).collect();
+            if self.preview {
+                raw = self.preview_lines.clone();
+            }
+            let wrapped: Vec<_> = raw
+                .iter()
+                .flat_map(|s| {
+                    if self.preview {
+                        wrap_source(s, width)
+                    } else {
+                        wrap(s, width)
+                    }
+                })
+                .collect();
+            self.center_preview(&wrapped);
             self.detail_offset = self
                 .detail_offset
                 .min(wrapped.len().saturating_sub(detail_page));
@@ -901,7 +1043,7 @@ impl View {
             color: 90,
         });
         screen.lines.push(Line {
-            text: self.message.clone(),
+            text: self.explore_status(),
             color: 0,
         });
         screen.lines.push(Line {
@@ -940,9 +1082,14 @@ impl View {
             return screen;
         }
         screen.lines.push(Line {
-            text: if self.mode == Mode::Combined {
+            text: if self.mode.is_combined() {
                 format!(
-                    "Combined | {} flows | {} functions",
+                    "{} | {} flows | {} functions",
+                    if self.mode == Mode::Lanes {
+                        "Lanes"
+                    } else {
+                        "Combined"
+                    },
                     self.records.len(),
                     self.graph.nodes.len()
                 )
@@ -979,6 +1126,7 @@ impl View {
                 width,
                 &[
                     ("Back", Action::More),
+                    ("Tools", Action::Tools),
                     ("Left", Action::Left),
                     ("Right", Action::Right),
                     ("Up", Action::Up),
@@ -1020,6 +1168,7 @@ impl View {
                     ("Diff dn", Action::Diff),
                     ("Version", Action::Version),
                     ("More", Action::More),
+                    ("Tools", Action::Tools),
                 ],
             );
         }
@@ -1069,6 +1218,9 @@ impl View {
             let end = (node.y + self.graph.node_height).min(self.camera.1 + graph_height);
             if left < right {
                 for y in start..end {
+                    if self.mode == Mode::Lanes && y == self.camera.1 {
+                        continue;
+                    }
                     screen.hits.push(Hit {
                         x: left - self.camera.0,
                         end: right - self.camera.0,
@@ -1116,18 +1268,37 @@ impl View {
                     .map(|(k, v)| format!("type {k}: {v}")),
             );
         } else {
-            details.push("No flows. Ask your agent to publish one.".into());
+            details.push(
+                if self.records.is_empty() {
+                    "No flows. Ask your agent to publish one."
+                } else {
+                    "No matching calls. Open Tools > Clear all filters."
+                }
+                .into(),
+            );
         }
         screen.lines.push(Line {
             text: details.first().cloned().unwrap_or_default(),
             color: 1,
         });
         if detail_height > 0 {
+            if self.preview {
+                details = std::iter::once(String::new())
+                    .chain(self.preview_lines.iter().cloned())
+                    .collect();
+            }
             let wrapped: Vec<_> = details
                 .iter()
                 .skip(1)
-                .flat_map(|s| wrap(s, width))
+                .flat_map(|s| {
+                    if self.preview {
+                        wrap_source(s, width)
+                    } else {
+                        wrap(s, width)
+                    }
+                })
                 .collect();
+            self.center_preview(&wrapped);
             self.detail_offset = self
                 .detail_offset
                 .min(wrapped.len().saturating_sub(detail_height));
@@ -1150,13 +1321,13 @@ impl View {
             color: 90,
         });
         screen.lines.push(Line {
-            text: if self.message.is_empty() {
+            text: if self.explore_status().is_empty() {
                 format!(
                     "Pan {},{} | dashed: if | double: shared | return: cycle",
                     self.camera.0, self.camera.1
                 )
             } else {
-                self.message.clone()
+                self.explore_status()
             },
             color: 90,
         });
@@ -1204,9 +1375,18 @@ impl View {
                 "[-]"
             };
             let text = format!(
-                "{prefix}{fold} {} {}{}{}",
+                "{prefix}{fold} {} {}{}{}{}",
                 f.marker(),
                 f.function,
+                if self
+                    .trace
+                    .as_ref()
+                    .is_some_and(|name| crate::explore::mentions(f, name))
+                {
+                    " *"
+                } else {
+                    ""
+                },
                 if f.concurrent == Some(true) {
                     " [parallel]"
                 } else {
@@ -1248,7 +1428,13 @@ impl View {
             });
             screen.lines.push(Line {
                 text: clip(&text, self.horizontal, width),
-                color: if self.selected == i {
+                color: if self
+                    .trace
+                    .as_ref()
+                    .is_some_and(|name| !crate::explore::mentions(f, name))
+                {
+                    90
+                } else if self.selected == i {
                     7
                 } else {
                     match f.marker() {
@@ -1263,7 +1449,7 @@ impl View {
     }
 }
 
-fn buttons(screen: &mut Screen, width: usize, items: &[(&str, Action)]) {
+pub(crate) fn buttons(screen: &mut Screen, width: usize, items: &[(&str, Action)]) {
     let mut line = String::new();
     for (label, action) in items {
         let text = format!("[{label}]");
@@ -1331,4 +1517,21 @@ pub fn wrap(text: &str, width: usize) -> Vec<String> {
         lines.push(line);
     }
     lines
+}
+
+pub fn wrap_source(text: &str, width: usize) -> Vec<String> {
+    let mut result = vec![];
+    let mut line = String::new();
+    let mut used = 0;
+    for c in clean(text).chars() {
+        let size = c.width().unwrap_or(0);
+        if used + size > width.max(1) && !line.is_empty() {
+            result.push(std::mem::take(&mut line));
+            used = 0;
+        }
+        line.push(c);
+        used += size;
+    }
+    result.push(line);
+    result
 }

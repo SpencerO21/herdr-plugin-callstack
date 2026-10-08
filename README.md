@@ -48,8 +48,9 @@ Other commands are `list`, `show NAME`, `delete NAME`, and `view --once`.
 
 Ask an agent to read [the bundled skill](skills/call-stack-driven-development/SKILL.md)
 to use this workflow. Linking the plugin does not install that skill into agents.
-Publishing remains an agent or command-line operation. There is no agent-start
-button or agent-refresh shortcut in this release.
+Publishing remains an agent or command-line operation. **Tools > Generate** and
+**Tools > Update selected flow** can request publication from an existing idle
+Herdr agent. They do not start a new agent automatically.
 
 ## Mouse and keyboard
 
@@ -63,6 +64,14 @@ button or agent-refresh shortcut in this release.
 | Details / Hide details | d | Show types, conditions, and notes below the stack |
 | More / Back | m | Show or hide extra controls |
 | Tree / Diagram / Combined | 1 / 2 / 3 | Select the view |
+| Tools | t | Open search, filters, preview, history, and agent controls |
+| Tools > Search functions | / | Find a function and jump to it |
+| Tools > Focus selected path | f | Hide unrelated branches; repeat to clear |
+| Tools > Changes only | x | Keep changed calls and their ancestors |
+| Tools > Source preview | s | Read source below the tree or diagram |
+| Tools > Module lanes | 4 | Group active flows by module |
+| Tools > History | h | Switch between active and archived flows |
+| Tools > Update selected flow | r | Prepare an agent request; confirmation is required |
 | Wheel, Up/Down, Page up/down | Arrows, PageUp/PageDown | Scroll |
 | Left / Right | Left/Right | Read long tree rows |
 | Expand all / Fold all | — | Change the whole tree |
@@ -83,6 +92,83 @@ Set `NO_COLOR=1` to disable colours. `[parallel]` marks calls that can start tog
 Buttons wrap in narrow panes. The full view needs at least 29 columns and 16 rows.
 Smaller panes show a resize message and a mouse-accessible Quit button.
 Terminal mouse handling and the normal screen are restored on exit.
+
+## Search, filters, and previews
+
+Open **Tools** in either the tree or diagram. Every tool has a mouse control.
+Search and agent requests accept typed text. The search field owns keyboard
+input while open, so typing shortcut letters does not trigger viewer actions.
+
+- Search matches function names without case sensitivity. It searches the
+  active flows, or archived flows while History is open. It shows up to 500
+  matches. Click a result to unfold and center it. A search jump clears path
+  and change filters so the result is visible.
+- Path focus keeps the selected function, its callers, and its descendants.
+  It removes unrelated sibling branches. Shared functions can retain callers
+  from multiple flows. The filter does not change saved data.
+- Changes only keeps calls marked added, modified, or removed, plus their
+  ancestors. It combines with path focus. Use **Clear all filters** to reset.
+- Trace a type lets you choose an input/output type name. Matching calls remain
+  bright; other calls become dim. A star also identifies matches without color.
+  Matching uses identifier tokens, not substring matching or type inference.
+- Source preview is a read-only snapshot below the tree or diagram. It shows
+  line numbers, up to 20 preceding lines, and 60 following lines. Scroll the
+  detail area to read it. Click Preview again to reload. Click Details to return
+  to call metadata. Preview reads run outside the input loop.
+
+Preview rejects files outside the project, non-UTF-8 or binary files, files
+over 4 MB, and invalid source lines. Selecting another call closes the old
+preview. Late preview results cannot replace a different call's content.
+
+## Module lanes
+
+**Tools > Module lanes** groups functions into labeled columns. It combines
+the currently visible flows. The frame's module field sets the column;
+missing modules use **Other**. A shared function uses its first occurrence's
+module. Version details still show each occurrence's module.
+
+Use the normal diagram movement controls to reach other columns. Compact,
+Expanded, focus, changes-only, type tracing, and source controls also work here.
+
+## Archive and restore
+
+**Tools > Archive selected flow** hides the selected flow from active views.
+**Tools > History** shows archived flows. Select a flow there and use
+**Restore selected flow** to return it to active views. Archiving is reversible.
+Deletion is still separate and requires confirmation.
+
+CLI equivalents are archive NAME and restore NAME. The list command includes
+archived flows and labels them. The view --once command prints active flows only.
+
+Archive state uses a separate local marker file. It does not rewrite flow data
+or source hashes. Publishing the same name preserves its archive state.
+History is an archive list, not a revision log. Publishing still replaces the
+previous data for that flow name.
+
+## Generate and update flows
+
+1. Open **Tools > Generate a new flow**, or **Update selected flow** (r).
+2. Enter the function or code path to inspect.
+3. Click **Choose agent**. Only idle/done agents in this workspace and project
+   folder are eligible. Agents in subfolders of the project are also eligible.
+4. Choose an agent. Review the target, project, and request.
+5. Click **Send request**. No request is sent before this confirmation.
+
+The plugin checks readiness and agent session identity again before submission.
+It never stops an agent or answers an agent approval prompt. If no eligible
+agent exists, start one in the project and try again. A Herdr server that does
+not support agent prompts reports an error; the plugin does not send raw keys
+as a fallback.
+
+The request asks the agent to read code and publish to this exact namespace,
+workspace, session, and state folder. It forbids source edits, commits, pushes,
+flow deletion, and external services. Update includes the current flow data
+and asks the agent to keep its name. The agent's normal permissions still apply.
+Requests may use agent credits.
+
+“Request sent” confirms submission only. It does not mean the flow is ready.
+Published data arrives through the existing file watcher. The plugin does not
+guarantee an agent's response or automatically retry failed submissions.
 
 ## Flow diagrams
 

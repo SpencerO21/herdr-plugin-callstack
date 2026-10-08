@@ -3,9 +3,9 @@
   "description": "This flow describes the source-opening path in this plugin.",
   "status": "current",
   "frames": [{
-    "fn": "View.event", "loc": "src/ui.rs:536", "in": "Mouse event",
+    "fn": "View.event", "loc": "src/ui.rs:643", "in": "Mouse event",
     "calls": [{
-      "fn": "View.action", "loc": "src/ui.rs:330",
+      "fn": "View.action", "loc": "src/ui.rs:417",
       "calls": [{
         "fn": "open_source", "loc": "src/host.rs:165",
         "calls": [

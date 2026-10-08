@@ -52,6 +52,8 @@ pub struct Frame {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Record {
+    #[serde(default)]
+    pub archived: bool,
     pub flow: Flow,
     pub scope: Scope,
     #[serde(default, skip_serializing_if = "Option::is_none")]

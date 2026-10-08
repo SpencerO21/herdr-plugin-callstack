@@ -28,6 +28,8 @@ enum Message {
     Data(Vec<Arc<Record>>),
     Status(String),
     Job(std::result::Result<String, String>),
+    Preview(String, std::result::Result<Vec<String>, String>),
+    Agents(std::result::Result<Vec<host::AgentTarget>, String>),
     Quit,
 }
 
@@ -135,6 +137,32 @@ fn watch(store: Store, tx: Sender<Message>) {
 fn job(effect: Effect, store: Store, tx: Sender<Message>) {
     thread::spawn(move || {
         let result: Result<String> = match effect {
+            Effect::Archive(name, archived) => store.set_archived(&name, archived).map(|_| {
+                if archived {
+                    "Flow archived. Open Tools > History to restore it.".into()
+                } else {
+                    "Flow restored.".into()
+                }
+            }),
+            Effect::Preview { project, loc, key } => {
+                let result = host::preview_source(&project, &loc).map_err(|e| format!("{e:#}"));
+                let _ = tx.send(Message::Preview(key, result));
+                return;
+            }
+            Effect::Agents(project) => {
+                let result = host::generation_agents(&store.scope.workspace, &project)
+                    .map_err(|e| format!("{e:#}"));
+                let _ = tx.send(Message::Agents(result));
+                return;
+            }
+            Effect::Generate {
+                target,
+                project,
+                subject,
+                flow,
+            } => host::request_generation(&target, &project, &store, &subject, flow.as_ref()).map(
+                |_| "Request sent. The agent must inspect the code and publish the result.".into(),
+            ),
             Effect::Open(project, loc) => {
                 host::open_source(&project, &loc).map(|_| "Opened the source in Neovim.".into())
             }
@@ -204,6 +232,8 @@ pub fn view(store: Store, project: Option<PathBuf>) -> Result<()> {
         match message {
             Message::Quit => break,
             Message::Data(data) => model.update(data),
+            Message::Preview(key, result) => model.accept_preview(&key, result),
+            Message::Agents(result) => model.accept_agents(result),
             Message::Status(status) => model.message = status,
             Message::Job(result) => {
                 model.busy = false;

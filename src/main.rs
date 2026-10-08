@@ -51,6 +51,10 @@ enum Commands {
     },
     /// Remove one flow. No undo is available.
     Delete { name: String },
+    /// Hide a flow from active views without deleting it.
+    Archive { name: String },
+    /// Return an archived flow to active views.
+    Restore { name: String },
     /// Run the terminal view. Mouse and keyboard controls are available.
     View {
         #[arg(long)]
@@ -129,7 +133,12 @@ fn run(cli: Cli) -> Result<()> {
                 println!("No flows.");
             } else {
                 for r in records {
-                    println!("{} [{}]", clean(&r.flow.name), r.flow.status());
+                    println!(
+                        "{} [{}]{}",
+                        clean(&r.flow.name),
+                        r.flow.status(),
+                        if r.archived { " [archived]" } else { "" }
+                    );
                 }
             }
         }
@@ -152,9 +161,17 @@ fn run(cli: Cli) -> Result<()> {
             store.delete(&name)?;
             println!("Deleted: {}", clean(&name));
         }
+        Commands::Archive { name } => {
+            store.set_archived(&name, true)?;
+            println!("Archived: {}", clean(&name));
+        }
+        Commands::Restore { name } => {
+            store.set_archived(&name, false)?;
+            println!("Restored: {}", clean(&name));
+        }
         Commands::View { once } => {
             if once || !io::stdin().is_terminal() || !io::stdout().is_terminal() {
-                let records = store.list()?;
+                let records: Vec<_> = store.list()?.into_iter().filter(|r| !r.archived).collect();
                 if records.is_empty() {
                     println!("No flows. Publish a flow to start.");
                 } else {

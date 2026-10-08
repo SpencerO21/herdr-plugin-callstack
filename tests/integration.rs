@@ -48,6 +48,7 @@ fn flow(name: &str) -> Flow {
 fn view() -> View {
     let records = ["A", "B"].map(|name| {
         Arc::new(Record {
+            archived: false,
             flow: flow(name),
             scope: scope(),
             project_root: Some("/project".into()),

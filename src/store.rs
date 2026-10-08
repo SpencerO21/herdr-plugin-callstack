@@ -60,6 +60,7 @@ impl Store {
             warnings.push("Could not inspect other saved flows for name conflicts.".into());
         }
         let record = Record {
+            archived: self.archive_file(&flow.name).exists(),
             flow,
             scope: self.scope.clone(),
             project_root: project,
@@ -90,7 +91,31 @@ impl Store {
         Ok(record)
     }
     pub fn delete(&self, name: &str) -> Result<()> {
-        fs::remove_file(self.file(name)).context("Flow not found or cannot be removed.")
+        fs::remove_file(self.file(name)).context("Flow not found or cannot be removed.")?;
+        self.set_archived_marker(name, false)
+    }
+    fn archive_file(&self, name: &str) -> PathBuf {
+        self.file(name).with_extension("archived")
+    }
+    pub fn set_archived(&self, name: &str, archived: bool) -> Result<()> {
+        ensure!(self.file(name).is_file(), "Flow not found.");
+        self.set_archived_marker(name, archived)
+    }
+    fn set_archived_marker(&self, name: &str, archived: bool) -> Result<()> {
+        if archived {
+            OpenOptions::new()
+                .write(true)
+                .create(true)
+                .truncate(false)
+                .mode(0o600)
+                .open(self.archive_file(name))?
+                .sync_all()?;
+        } else if let Err(error) = fs::remove_file(self.archive_file(name))
+            && error.kind() != std::io::ErrorKind::NotFound
+        {
+            return Err(error.into());
+        }
+        Ok(())
     }
     pub fn list(&self) -> Result<Vec<Arc<Record>>> {
         let mut cache = Cache::default();
@@ -153,7 +178,13 @@ impl Cache {
             if let Some((old, record)) = self.entries.get(&path)
                 && old == &stamp
             {
-                next.insert(path, (stamp, record.clone()));
+                let archived = path.with_extension("archived").exists();
+                let mut record = record.clone();
+                if archived != record.archived {
+                    Arc::make_mut(&mut record).archived = archived;
+                    changed = true;
+                }
+                next.insert(path, (stamp, record));
                 continue;
             }
             let file = match File::open(&path) {
@@ -161,9 +192,10 @@ impl Cache {
                 Err(e) if e.kind() == std::io::ErrorKind::NotFound => continue,
                 Err(e) => return Err(e.into()),
             };
-            let record: Record = serde_json::from_slice(&read_limited(file, RECORD_LIMIT)?)
+            let mut record: Record = serde_json::from_slice(&read_limited(file, RECORD_LIMIT)?)
                 .with_context(|| format!("Cannot read flow {}", path.display()))?;
             record.flow.validate()?;
+            record.archived = path.with_extension("archived").exists();
             ensure!(
                 record.scope == store.scope,
                 "Flow scope does not match its folder."

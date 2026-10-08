@@ -41,6 +41,8 @@ impl Occurrence {
 
 #[derive(Debug)]
 pub struct Node {
+    pub dimmed: bool,
+    pub traced: bool,
     pub key: String,
     pub occurrences: Vec<Occurrence>,
     pub depth: usize,
@@ -76,6 +78,7 @@ pub struct Edge {
 }
 #[derive(Default, Debug)]
 pub struct Graph {
+    pub lanes: Vec<(String, usize)>,
     pub nodes: Vec<Node>,
     pub edges: Vec<Edge>,
     pub width: usize,
@@ -124,6 +127,8 @@ impl Graph {
                     let node = *self.nodes.entry(key.clone()).or_insert(next);
                     if node == next {
                         self.graph.nodes.push(Node {
+                            dimmed: false,
+                            traced: false,
                             key,
                             occurrences: vec![],
                             depth: path.len() - 1,
@@ -174,6 +179,7 @@ impl Graph {
     }
 
     pub fn layout(&mut self, expanded: bool) {
+        self.lanes.clear();
         self.node_width = if expanded { 36 } else { 26 };
         self.node_height = if expanded { 9 } else { 5 };
         let mut layers = BTreeMap::<usize, Vec<usize>>::new();
@@ -306,14 +312,22 @@ impl Graph {
                 continue;
             }
             let markers = node.markers();
-            let color = match markers.as_str() {
-                "+" => 32,
-                "-" => 31,
-                "~" => 33,
-                "=" => 0,
-                _ => 33,
+            let color = if node.dimmed {
+                90
+            } else if node.traced {
+                36
+            } else {
+                match markers.as_str() {
+                    "+" => 32,
+                    "-" => 31,
+                    "~" => 33,
+                    "=" => 0,
+                    _ => 33,
+                }
             };
-            let border = if index == selected.0 {
+            let border = if node.dimmed {
+                style(90)
+            } else if index == selected.0 {
                 Style::default()
                     .fg(Color::Cyan)
                     .add_modifier(Modifier::BOLD)
@@ -328,7 +342,15 @@ impl Graph {
             let frame = occurrence.frame();
             let mut labels = vec![format!(
                 "{}{markers} {}",
-                if index == selected.0 { "> " } else { "" },
+                if index == selected.0 && node.traced {
+                    ">* "
+                } else if index == selected.0 {
+                    "> "
+                } else if node.traced {
+                    "* "
+                } else {
+                    ""
+                },
                 frame.function
             )];
             let mut tags = vec![];
@@ -417,9 +439,23 @@ impl Graph {
                     node.x + 1,
                     node.y + 1 + line,
                     text,
-                    if line == 0 { border } else { Style::default() },
+                    if line == 0 {
+                        border
+                    } else if node.dimmed {
+                        style(90)
+                    } else {
+                        Style::default()
+                    },
                     self.node_width - 2,
                 );
+            }
+        }
+        if !self.lanes.is_empty() && height > 0 {
+            for x in 0..width {
+                canvas.buffer[(x, 0)].reset();
+            }
+            for (name, x) in &self.lanes {
+                canvas.text(*x, camera.1, name, style(36), self.node_width);
             }
         }
         canvas.buffer
