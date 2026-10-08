@@ -75,14 +75,37 @@ fn watch(store: Store, tx: Sender<Message>) {
             ));
         }
         let mut cache = Cache::default();
+        let mut sources = crate::audit::SourceCache::default();
+        let mut source_dirs = std::collections::HashSet::new();
+        let mut last_drift = vec![];
         let mut first = true;
         let mut old_error = String::new();
         loop {
             match cache.refresh(&store) {
                 Ok(changed) => {
-                    if (changed || first) && tx.send(Message::Data(cache.records())).is_err() {
+                    let records = sources.refresh(&cache.records());
+                    let drift: Vec<_> = records
+                        .iter()
+                        .map(|r| (r.flow.name.clone(), r.drifted_paths.clone()))
+                        .collect();
+                    let dirs = crate::audit::watch_directories(&records);
+                    if let Some(watcher) = watcher.as_mut() {
+                        for dir in source_dirs.difference(&dirs) {
+                            if dir != &store.directory {
+                                let _ = watcher.unwatch(dir);
+                            }
+                        }
+                        for dir in dirs.difference(&source_dirs) {
+                            let _ = watcher.watch(dir, RecursiveMode::NonRecursive);
+                        }
+                    }
+                    source_dirs = dirs;
+                    if (changed || first || drift != last_drift)
+                        && tx.send(Message::Data(records)).is_err()
+                    {
                         return;
                     }
+                    last_drift = drift;
                     if !old_error.is_empty() {
                         let _ = tx.send(Message::Status("Flow data loaded.".into()));
                         old_error.clear();
@@ -115,6 +138,9 @@ fn job(effect: Effect, store: Store, tx: Sender<Message>) {
         let result: Result<String> = match effect {
             Effect::Open(project, loc) => {
                 host::open_source(&project, &loc).map(|_| "Opened the source in Neovim.".into())
+            }
+            Effect::Diff(project, loc) => {
+                host::open_diff(&project, &loc).map(|_| "Opened the file diff through dn.".into())
             }
             Effect::Delete(name) => store
                 .delete(&name)

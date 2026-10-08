@@ -50,11 +50,23 @@ impl Store {
     pub fn publish(&self, flow: Flow, project: Option<String>) -> Result<Record> {
         flow.validate()?;
         self.ensure_dir()?;
+        let others = self.list();
+        let (source_hashes, mut warnings) = crate::audit::publish_checks(
+            &flow,
+            project.as_deref().map(Path::new),
+            others.as_deref().unwrap_or_default(),
+        );
+        if others.is_err() {
+            warnings.push("Could not inspect other saved flows for name conflicts.".into());
+        }
         let record = Record {
             flow,
             scope: self.scope.clone(),
             project_root: project,
             updated_at: OffsetDateTime::now_utc().format(&Rfc3339)?,
+            source_hashes,
+            warnings,
+            drifted_paths: vec![],
         };
         let destination = self.file(&record.flow.name);
         let temporary = destination.with_extension(format!(
@@ -83,12 +95,12 @@ impl Store {
     pub fn list(&self) -> Result<Vec<Arc<Record>>> {
         let mut cache = Cache::default();
         cache.refresh(self)?;
-        Ok(cache.records())
+        Ok(crate::audit::SourceCache::default().refresh(&cache.records()))
     }
 }
 
 #[derive(PartialEq, Eq, Clone)]
-struct Stamp {
+pub(crate) struct Stamp {
     modified: Option<SystemTime>,
     len: u64,
     inode: u64,
@@ -96,7 +108,7 @@ struct Stamp {
     nanos: i64,
 }
 impl Stamp {
-    fn read(path: &Path) -> Result<Self> {
+    pub(crate) fn read(path: &Path) -> Result<Self> {
         let m = fs::metadata(path)?;
         Ok(Self {
             modified: m.modified().ok(),

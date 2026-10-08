@@ -26,6 +26,21 @@ fn native_file_event_updates_the_view_before_the_fallback_check() {
     assert!(
         matches!(rx.recv_timeout(Duration::from_secs(3)).unwrap(), Message::Data(records) if records.len() == 1 && records[0].flow.name == "Live")
     );
+    let source = root.join("source.rs");
+    std::fs::write(&source, "fn updated() {}\n").unwrap();
+    let flow: Flow =
+        serde_json::from_str(r#"{"name":"Live","frames":[{"fn":"updated","loc":"source.rs:1"}]}"#)
+            .unwrap();
+    store
+        .publish(flow, Some(root.to_string_lossy().into()))
+        .unwrap();
+    assert!(
+        matches!(rx.recv_timeout(Duration::from_secs(3)).unwrap(), Message::Data(records) if records[0].source_hashes.is_some() && records[0].drifted_paths.is_empty())
+    );
+    std::fs::write(&source, "fn updated() { changed(); }\n").unwrap();
+    assert!(
+        matches!(rx.recv_timeout(Duration::from_secs(3)).unwrap(), Message::Data(records) if records[0].drifted_paths == ["source.rs"])
+    );
     drop(rx);
     std::fs::remove_dir_all(root).unwrap();
 }

@@ -58,6 +58,7 @@ button or agent-refresh shortcut in this release.
 | Click a function | Up/Down or j/k | Select a call |
 | Click `[+]` or `[-]`, or Fold | Enter or Space | Expand or fold nested calls |
 | Double-click a function, or Open nvim | o | Open the source line in a new Neovim pane |
+| Diff dn | g | Open the selected file's changes in DiffNav through `dn` |
 | Prev / Next | Shift+Tab / Tab | Change flows |
 | Details / Back | d | Show types, conditions, and notes |
 | Wheel, Up/Down, Page up/down | Arrows, PageUp/PageDown | Scroll |
@@ -91,6 +92,46 @@ Each source-open request creates a new editor pane. Herdr commands run on a
 worker with a 10-second timeout. You can still navigate or quit while a command
 runs. A second open request is ignored until the first one finishes.
 The editor process replaces itself with Neovim; it leaves no wrapper process.
+
+## Source checks and change warnings
+
+Publishing checks source file locations, line numbers, and function names.
+It also warns about inconsistent status/change labels, unused type definitions,
+parallel calls without a parallel neighbour, and near-matching function names
+across saved flows. Warnings do not block publication. Function checks search
+text; they do not prove that a function calls another function.
+
+The plugin saves a content hash for each referenced source file. It watches
+their parent folders and marks affected calls with **SOURCE CHANGED** when file
+contents differ. Deleted files also cause warnings. Open **Details** to read
+the warnings and changed-file list. Republish a verified flow to set a new
+baseline. Restoring the exact saved file content also clears the change marker.
+
+Source checks run outside the input loop. Unchanged source files reuse cached
+hashes. The five-second metadata check recovers missed file events. Files outside
+the project, non-text files, and files over 4 MB cannot be checked.
+Old records show **UNTRACKED** until republished. Source tracking always uses
+the project folder saved at publication. It does not use a different viewer
+`--project` override. The plugin does not generate a corrected tree or move
+source line numbers automatically.
+
+## DiffNav
+
+Click **Diff dn** or press `g` to open the selected file's diff in another pane.
+The pane runs your interactive shell's `dn` command with a file-specific
+`--watch-cmd`. Define `dn` as an alias or function for DiffNav, for example:
+
+```sh
+alias dn='diffnav --watch'
+```
+
+The diff compares the working tree with the common ancestor of `origin/main`
+and `HEAD`. This includes branch changes and local edits. If `origin/main` is
+unavailable, it compares with `HEAD`. It shows only the selected file, including
+deleted files. Untracked files are not included by Git diff.
+DiffNav has no source-line jump option, so this opens the file's changes, not
+an exact function line. Your existing alias's watch command is overridden for
+this pane only. Your shell configuration is not changed.
 
 ## Storage and compatibility
 
@@ -144,7 +185,7 @@ Frame fields: `fn`, `loc`, `in`, `out`, `cond`, `loop`, `change`, `concurrent`,
 
 Limits: 2 MB input, 50 calls per group, 20 nested levels, and 5000 total calls.
 Control characters in supplied text are replaced before terminal display.
-The plugin does not detect source-code changes or generate a new flow itself.
+The plugin detects source-file changes. It does not generate a new flow itself.
 
 ## Development checks
 

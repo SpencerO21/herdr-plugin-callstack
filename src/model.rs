@@ -57,6 +57,12 @@ pub struct Record {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub project_root: Option<String>,
     pub updated_at: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source_hashes: Option<BTreeMap<String, Option<String>>>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub warnings: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub drifted_paths: Vec<String>,
 }
 
 fn text(value: &str, field: &str, max: usize, required: bool) -> Result<()> {

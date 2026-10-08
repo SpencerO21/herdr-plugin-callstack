@@ -14,6 +14,7 @@ pub enum Action {
     Next,
     Details,
     Open,
+    Diff,
     Fold,
     Expand,
     Collapse,
@@ -33,6 +34,7 @@ pub enum Effect {
     None,
     Quit,
     Open(PathBuf, String),
+    Diff(PathBuf, String),
     Delete(String),
 }
 #[derive(Clone, Debug)]
@@ -269,7 +271,7 @@ impl View {
                     return Effect::Delete(name);
                 }
             }
-            Action::Open if !self.busy => {
+            Action::Open | Action::Diff if !self.busy => {
                 let loc = self.frame(self.selected).and_then(|f| f.loc.clone());
                 let project = self.project.clone().or_else(|| {
                     self.record()
@@ -278,8 +280,17 @@ impl View {
                 match (project, loc) {
                     (Some(project), Some(loc)) => {
                         self.busy = true;
-                        self.message = "Opening Neovim…".into();
-                        return Effect::Open(project, loc);
+                        self.message = if action == Action::Diff {
+                            "Opening DiffNav…"
+                        } else {
+                            "Opening Neovim…"
+                        }
+                        .into();
+                        return if action == Action::Diff {
+                            Effect::Diff(project, loc)
+                        } else {
+                            Effect::Open(project, loc)
+                        };
                     }
                     (_, None) => self.message = "This call has no source location.".into(),
                     _ => self.message = "Set the project folder with --project PATH.".into(),
@@ -298,6 +309,7 @@ impl View {
                     }
                     KeyCode::Char('q') => Some(Action::Quit),
                     KeyCode::Char('o') => Some(Action::Open),
+                    KeyCode::Char('g') => Some(Action::Diff),
                     KeyCode::Char('d') => Some(Action::Details),
                     KeyCode::Enter | KeyCode::Char(' ') => Some(Action::Fold),
                     KeyCode::Up | KeyCode::Char('k') => Some(Action::Up),
@@ -393,7 +405,7 @@ impl View {
             .record()
             .map(|r| {
                 format!(
-                    "{}/{} {} [{}]",
+                    "{}/{} {} [{}]{}{}",
                     self.records
                         .iter()
                         .position(|a| a.flow.name == r.flow.name)
@@ -401,7 +413,21 @@ impl View {
                         + 1,
                     self.records.len(),
                     r.flow.name,
-                    r.flow.status()
+                    r.flow.status(),
+                    if r.drifted_paths.is_empty() {
+                        String::new()
+                    } else {
+                        format!(" [SOURCE CHANGED: {}]", r.drifted_paths.len())
+                    },
+                    if r.warnings.is_empty() {
+                        if r.source_hashes.is_none() {
+                            " [UNTRACKED]".into()
+                        } else {
+                            String::new()
+                        }
+                    } else {
+                        format!(" [WARNINGS: {}]", r.warnings.len())
+                    }
                 )
             })
             .unwrap_or_else(|| "No flows. Ask your agent to publish one.".into());
@@ -427,6 +453,7 @@ impl View {
                     Action::Details,
                 ),
                 ("Open nvim", Action::Open),
+                ("Diff dn", Action::Diff),
                 ("Fold", Action::Fold),
                 ("Expand all", Action::Expand),
                 ("Fold all", Action::Collapse),
@@ -475,6 +502,18 @@ impl View {
         if self.detail {
             let mut raw = vec![];
             if let Some(record) = self.record() {
+                if record.source_hashes.is_none() {
+                    raw.push(
+                        "Source tracking unavailable. Republish this flow with a project folder."
+                            .into(),
+                    );
+                }
+                for path in &record.drifted_paths {
+                    raw.push(format!(
+                        "SOURCE CHANGED: {path}. Verify the code and republish."
+                    ));
+                }
+                raw.extend(record.warnings.iter().map(|s| format!("Warning: {s}")));
                 if let Some(d) = &record.flow.description {
                     raw.push(d.clone());
                 }
@@ -535,7 +574,7 @@ impl View {
                     "[-]"
                 };
                 let text = format!(
-                    "{prefix}{fold} {} {}{}{}",
+                    "{prefix}{fold} {} {}{}{}{}",
                     f.marker(),
                     f.function,
                     if f.concurrent == Some(true) {
@@ -543,7 +582,21 @@ impl View {
                     } else {
                         ""
                     },
-                    f.loc.as_ref().map(|s| format!("  {s}")).unwrap_or_default()
+                    f.loc.as_ref().map(|s| format!("  {s}")).unwrap_or_default(),
+                    if f.loc
+                        .as_ref()
+                        .and_then(|loc| crate::host::location_parts(loc).ok())
+                        .is_some_and(|(path, _)| self
+                            .record()
+                            .unwrap()
+                            .drifted_paths
+                            .iter()
+                            .any(|p| p == path))
+                    {
+                        " [SOURCE CHANGED]"
+                    } else {
+                        ""
+                    }
                 );
                 let y = screen.lines.len();
                 if !f.calls.is_empty() {

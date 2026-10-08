@@ -16,7 +16,7 @@ pub struct Source {
     pub line: u64,
 }
 
-pub fn source_location(project: &Path, location: &str) -> Result<Source> {
+pub fn location_parts(location: &str) -> Result<(&str, u64)> {
     ensure!(!location.is_empty(), "This call has no source location.");
     ensure!(
         !location.chars().any(char::is_control),
@@ -39,23 +39,57 @@ pub fn source_location(project: &Path, location: &str) -> Result<Source> {
         }
     }
     ensure!(line > 0 && line <= i32::MAX as u64, "Invalid source line.");
+    Ok((path, line))
+}
+
+// Allow a missing file for deleted-file diffs. Resolve its nearest existing
+// ancestor to reject traversal and symbolic links outside the project.
+pub fn source_path(project: &Path, location: &str) -> Result<Source> {
+    let (path, line) = location_parts(location)?;
     let project = project
         .canonicalize()
         .context("Cannot read the project folder. Use --project PATH.")?;
-    let file = project
-        .join(path)
-        .canonicalize()
-        .with_context(|| format!("Cannot read source file: {path}"))?;
     ensure!(
-        file.starts_with(&project),
+        !Path::new(path)
+            .components()
+            .any(|c| matches!(c, std::path::Component::ParentDir)),
+        "The source path contains parent traversal."
+    );
+    let file = project.join(path);
+    let mut ancestor = file.as_path();
+    while !ancestor.exists() {
+        ensure!(
+            std::fs::symlink_metadata(ancestor).is_err(),
+            "The source path contains a broken symbolic link."
+        );
+        ancestor = ancestor.parent().context("Invalid source path.")?;
+    }
+    let resolved = ancestor.canonicalize()?;
+    ensure!(
+        resolved.starts_with(&project),
         "The source file is outside the project folder."
     );
-    ensure!(file.is_file(), "The source path is not a file.");
+    let suffix = file.strip_prefix(ancestor)?;
+    let file = if suffix.as_os_str().is_empty() {
+        resolved
+    } else {
+        resolved.join(suffix)
+    };
     Ok(Source {
         project,
         file,
         line,
     })
+}
+
+pub fn source_location(project: &Path, location: &str) -> Result<Source> {
+    let source = source_path(project, location)?;
+    ensure!(
+        source.file.is_file(),
+        "Cannot read source file: {}",
+        source.file.display()
+    );
+    Ok(source)
 }
 
 // Drain both pipes while waiting, so a full output pipe cannot deadlock the child.
@@ -130,6 +164,14 @@ pub fn herdr(args: &[String]) -> Result<Value> {
 
 pub fn open_source(project: &Path, location: &str) -> Result<()> {
     let source = source_location(project, location)?;
+    open_source_pane(source, "editor")
+}
+
+pub fn open_diff(project: &Path, location: &str) -> Result<()> {
+    open_source_pane(source_path(project, location)?, "diff")
+}
+
+fn open_source_pane(source: Source, entrypoint: &str) -> Result<()> {
     let target =
         env::var("HERDR_PANE_ID").context("Open the tree in a Herdr pane to use Neovim.")?;
     let mut args: Vec<String> = [
@@ -139,7 +181,7 @@ pub fn open_source(project: &Path, location: &str) -> Result<()> {
         "--plugin",
         "callstack",
         "--entrypoint",
-        "editor",
+        entrypoint,
         "--target-pane",
         &target,
         "--direction",
@@ -161,6 +203,38 @@ pub fn open_source(project: &Path, location: &str) -> Result<()> {
     }
     herdr(&args)?;
     Ok(())
+}
+
+pub const DIFF_COMMAND: &str = "git --literal-pathspecs diff --no-ext-diff --no-color \"$(git merge-base origin/main HEAD 2>/dev/null || git rev-parse HEAD)\" -- \"$CALLSTACK_DIFF_FILE\"";
+
+pub fn diff_source() -> Result<()> {
+    use std::os::unix::process::CommandExt;
+    let project = env::var("CALLSTACK_PROJECT").context("Missing project folder.")?;
+    let file = env::var("CALLSTACK_FILE").context("Missing source file.")?;
+    let source = source_path(Path::new(&project), &file)?;
+    let result = Command::new("git")
+        .args(["rev-parse", "--show-toplevel"])
+        .current_dir(&source.project)
+        .output()?;
+    ensure!(
+        result.status.success(),
+        "The project is not a Git repository."
+    );
+    let git_root = PathBuf::from(String::from_utf8(result.stdout)?.trim());
+    let git_root = git_root.canonicalize()?;
+    let relative = source
+        .file
+        .strip_prefix(&git_root)
+        .context("The file is outside the Git repository.")?;
+    // The shell reads the user's dn alias. Source paths stay in environment
+    // variables, never in executable shell text. The alias's watch command is overridden.
+    let error = Command::new(env::var("SHELL").unwrap_or_else(|_| "/bin/zsh".into()))
+        .args(["-ic", "dn --watch-cmd \"$CALLSTACK_DIFF_COMMAND\""])
+        .env("CALLSTACK_DIFF_FILE", relative)
+        .env("CALLSTACK_DIFF_COMMAND", DIFF_COMMAND)
+        .current_dir(git_root)
+        .exec();
+    Err(error).context("Cannot start dn. Define dn in your interactive shell configuration.")
 }
 
 pub fn edit_source() -> Result<()> {

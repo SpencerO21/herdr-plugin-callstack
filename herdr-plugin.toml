@@ -1,6 +1,6 @@
 id = "callstack"
 name = "Call stacks"
-version = "0.3.0"
+version = "0.4.0"
 min_herdr_version = "0.9.1"
 description = "Inspect current and proposed call flows in a live terminal tree."
 platforms = ["macos", "linux"]
@@ -25,3 +25,9 @@ id = "editor"
 title = "Call stack source"
 placement = "split"
 command = ["./target/release/herdr-callstack", "edit"]
+
+[[panes]]
+id = "diff"
+title = "Call stack diff"
+placement = "split"
+command = ["./target/release/herdr-callstack", "diff"]

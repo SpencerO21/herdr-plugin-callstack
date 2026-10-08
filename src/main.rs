@@ -60,6 +60,8 @@ enum Commands {
     Open,
     #[command(hide = true)]
     Edit,
+    #[command(hide = true)]
+    Diff,
 }
 
 fn run(cli: Cli) -> Result<()> {
@@ -70,6 +72,9 @@ fn run(cli: Cli) -> Result<()> {
     };
     if matches!(command, Commands::Edit) {
         return host::edit_source();
+    }
+    if matches!(command, Commands::Diff) {
+        return host::diff_source();
     }
     let scope = Scope {
         namespace: cli
@@ -107,6 +112,9 @@ fn run(cli: Cli) -> Result<()> {
                 .context("Cannot read the project folder.")?;
             let record = store.publish(flow, Some(project.to_string_lossy().into_owned()))?;
             println!("Published: {}", clean(&record.flow.name));
+            for warning in record.warnings {
+                println!("Warning: {}", clean(&warning));
+            }
         }
         Commands::List { json } => {
             let records = store.list()?;
@@ -211,7 +219,7 @@ fn run(cli: Cli) -> Result<()> {
             }
             println!("{}", host::herdr(&args)?);
         }
-        Commands::Edit => unreachable!(),
+        Commands::Edit | Commands::Diff => unreachable!(),
     }
     Ok(())
 }

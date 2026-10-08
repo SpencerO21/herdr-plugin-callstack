@@ -28,6 +28,10 @@ Use one stable session name for the task. Use the same session for the viewer.
 Run publishing commands from the source project, or supply `--project PATH`.
 Set valid `loc` fields such as `src/orders.ts:142`. The user can double-click
 a call to open that file and line in Neovim.
+The user can also click Diff dn to open that file's changes. Read publication
+warnings and correct wrong file paths, line numbers, and function names.
+When SOURCE CHANGED appears, read the changed source and republish the verified
+flow. Publishing resets its saved source hashes; do not republish stale analysis.
 Inside Herdr, the workspace comes from `HERDR_WORKSPACE_ID`. Outside Herdr,
 supply `--workspace NAME` and the viewer's `--namespace NAME`.
 

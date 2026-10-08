@@ -52,6 +52,9 @@ fn view() -> View {
             scope: scope(),
             project_root: Some("/project".into()),
             updated_at: "2026-10-08T00:00:00Z".into(),
+            source_hashes: None,
+            warnings: vec![],
+            drifted_paths: vec![],
         })
     });
     let mut view = View::new(scope(), None);
@@ -366,5 +369,162 @@ fn concurrent_cli_publish_preserves_all_flows() {
     assert_eq!(
         Store::new(&temp.0, scope()).unwrap().list().unwrap().len(),
         12
+    );
+}
+
+#[test]
+fn publish_checks_files_lines_names_and_flow_consistency() {
+    let temp = Temp::new();
+    fs::write(temp.0.join("source.rs"), "fn valid() {}\n").unwrap();
+    let f: Flow = serde_json::from_value(
+        serde_json::json!({"name":"audit","status":"current","types":{"Unused":"string"},"frames":[
+            {"fn":"missingName","loc":"source.rs:99","change":"added","concurrent":true},
+            {"fn":"gone","loc":"missing.rs:1"}
+        ]}),
+    )
+    .unwrap();
+    let (hashes, warnings) = herdr_callstack::audit::publish_checks(&f, Some(&temp.0), &[]);
+    assert!(hashes.unwrap()["source.rs"].is_some());
+    for text in [
+        "past the end",
+        "function name not found",
+        "Cannot read missing.rs",
+        "Current flow",
+        "Type Unused",
+        "parallel call",
+    ] {
+        assert!(
+            warnings.iter().any(|w| w.contains(text)),
+            "Missing warning: {text}"
+        );
+    }
+}
+
+#[test]
+fn source_drift_is_cached_detects_deletion_and_clears_on_republish() {
+    let temp = Temp::new();
+    let path = temp.0.join("source.rs");
+    fs::write(&path, "fn valid() {}\n").unwrap();
+    let f: Flow =
+        serde_json::from_str(r#"{"name":"audit","frames":[{"fn":"valid","loc":"source.rs:1"}]}"#)
+            .unwrap();
+    let store = Store::new(&temp.0.join("state"), scope()).unwrap();
+    let record = store
+        .publish(f.clone(), Some(temp.0.to_string_lossy().into()))
+        .unwrap();
+    assert!(record.warnings.is_empty());
+    let records = vec![Arc::new(record)];
+    let mut cache = herdr_callstack::audit::SourceCache::default();
+    assert!(cache.refresh(&records)[0].drifted_paths.is_empty());
+    for _ in 0..50 {
+        cache.refresh(&records);
+    }
+    assert_eq!(cache.reads, 1);
+    fs::write(&path, "fn valid() { changed(); }\n").unwrap();
+    assert_eq!(cache.refresh(&records)[0].drifted_paths, ["source.rs"]);
+    let mut view = View::new(scope(), None);
+    view.update(cache.refresh(&records));
+    assert!(
+        view.render(140, 25)
+            .lines
+            .iter()
+            .any(|l| l.text.contains("SOURCE CHANGED"))
+    );
+    let updated = store
+        .publish(f, Some(temp.0.to_string_lossy().into()))
+        .unwrap();
+    assert!(
+        cache.refresh(&[Arc::new(updated)])[0]
+            .drifted_paths
+            .is_empty()
+    );
+    fs::remove_file(&path).unwrap();
+    assert_eq!(cache.refresh(&records)[0].drifted_paths, ["source.rs"]);
+    assert!(host::source_path(&temp.0, "source.rs:1").is_ok());
+    assert!(host::source_location(&temp.0, "source.rs:1").is_err());
+}
+
+#[test]
+fn diff_mouse_button_and_shortcut_return_a_background_effect() {
+    let mut v = view();
+    assert!(matches!(click(&mut v, Action::Diff), Effect::Diff(_, loc) if loc == "source.rs:12"));
+    v.busy = false;
+    let screen = v.render(100, 30);
+    let key = Event::Key(crossterm::event::KeyEvent::new(
+        crossterm::event::KeyCode::Char('g'),
+        KeyModifiers::NONE,
+    ));
+    assert!(matches!(
+        v.event(key, &screen, Instant::now()),
+        Effect::Diff(_, _)
+    ));
+}
+
+#[test]
+fn diff_command_limits_paths_and_includes_local_edits() {
+    let temp = Temp::new();
+    let git = |args: &[&str]| {
+        let out = Command::new("git")
+            .args(args)
+            .current_dir(&temp.0)
+            .output()
+            .unwrap();
+        assert!(
+            out.status.success(),
+            "{}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+    };
+    git(&["init", "-b", "main"]);
+    let file = "source ' $(touch BAD).rs";
+    fs::write(temp.0.join(file), "before\n").unwrap();
+    fs::write(temp.0.join("other.rs"), "before\n").unwrap();
+    git(&["add", "."]);
+    git(&[
+        "-c",
+        "user.name=Test",
+        "-c",
+        "user.email=test@example.com",
+        "commit",
+        "-m",
+        "base",
+    ]);
+    git(&["update-ref", "refs/remotes/origin/main", "HEAD"]);
+    fs::write(temp.0.join(file), "branch\n").unwrap();
+    git(&["add", "."]);
+    git(&[
+        "-c",
+        "user.name=Test",
+        "-c",
+        "user.email=test@example.com",
+        "commit",
+        "-m",
+        "branch",
+    ]);
+    fs::write(temp.0.join(file), "local edit\n").unwrap();
+    fs::write(temp.0.join("other.rs"), "excluded\n").unwrap();
+    let result = Command::new("/bin/sh")
+        .args(["-c", host::DIFF_COMMAND])
+        .env("CALLSTACK_DIFF_FILE", file)
+        .current_dir(&temp.0)
+        .output()
+        .unwrap();
+    assert!(result.status.success());
+    let diff = String::from_utf8(result.stdout).unwrap();
+    assert!(diff.contains("+local edit") && diff.contains("-before"));
+    assert!(!diff.contains("other.rs"));
+    assert!(!temp.0.join("BAD").exists());
+    git(&["update-ref", "-d", "refs/remotes/origin/main"]);
+    let result = Command::new("/bin/sh")
+        .args(["-c", host::DIFF_COMMAND])
+        .env("CALLSTACK_DIFF_FILE", file)
+        .current_dir(&temp.0)
+        .output()
+        .unwrap();
+    assert!(result.status.success());
+    assert!(
+        String::from_utf8(result.stdout)
+            .unwrap()
+            .contains("-branch")
     );
 }
