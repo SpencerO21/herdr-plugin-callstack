@@ -605,3 +605,14 @@ fn diff_command_limits_paths_and_includes_local_edits() {
             .contains("-branch")
     );
 }
+
+#[test]
+fn diff_tool_defaults_to_diffnav_and_reads_plugin_config() {
+    let temp = Temp::new();
+    assert_eq!(host::diff_tool(None).unwrap(), host::DiffTool::Diffnav);
+    assert_eq!(host::diff_tool(Some(&temp.0)).unwrap(), host::DiffTool::Diffnav);
+    fs::write(temp.0.join("config.toml"), "diff_tool = \"lazygit\"\n").unwrap();
+    assert_eq!(host::diff_tool(Some(&temp.0)).unwrap(), host::DiffTool::Lazygit);
+    fs::write(temp.0.join("config.toml"), "diff_tool = \"meld\"\n").unwrap();
+    assert!(host::diff_tool(Some(&temp.0)).is_err());
+}

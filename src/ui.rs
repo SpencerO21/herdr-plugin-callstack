@@ -621,7 +621,7 @@ impl View {
                     (Some(project), Some(loc)) => {
                         self.busy = true;
                         self.message = if action == Action::Diff {
-                            "Opening DiffNav…"
+                            "Opening diff…"
                         } else {
                             "Opening Neovim…"
                         }
@@ -903,7 +903,7 @@ impl View {
                     Action::Details,
                 ),
                 ("Open nvim", Action::Open),
-                ("Diff dn", Action::Diff),
+                ("Diff", Action::Diff),
                 ("More", Action::More),
                 ("Diagram", Action::Diagram),
                 ("Combined", Action::Combined),
@@ -1165,7 +1165,7 @@ impl View {
                         Action::Details,
                     ),
                     ("Open nvim", Action::Open),
-                    ("Diff dn", Action::Diff),
+                    ("Diff", Action::Diff),
                     ("Version", Action::Version),
                     ("More", Action::More),
                     ("Tools", Action::Tools),
