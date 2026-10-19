@@ -205,36 +205,52 @@ fn open_source_pane(source: Source, entrypoint: &str) -> Result<()> {
     Ok(())
 }
 
+const DIFFNAV_COMMAND: &str = "if command -v dn >/dev/null 2>&1; then dn --watch-cmd \"$CALLSTACK_DIFF_COMMAND\"; else diffnav --watch --watch-cmd \"$CALLSTACK_DIFF_COMMAND\"; fi";
+
+pub const GIT_COMMAND: &str = "git -c color.ui=always --literal-pathspecs diff \"$(git merge-base origin/main HEAD 2>/dev/null || git rev-parse HEAD)\" -- \"$CALLSTACK_DIFF_FILE\" | less -R";
+
 pub const DIFF_COMMAND: &str = "git --literal-pathspecs diff --no-ext-diff --no-color \"$(git merge-base origin/main HEAD 2>/dev/null || git rev-parse HEAD)\" -- \"$CALLSTACK_DIFF_FILE\"";
 
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum DiffTool {
-    #[default]
     Diffnav,
     Lazygit,
+    Git,
 }
 
 #[derive(Default, serde::Deserialize)]
 struct Config {
-    #[serde(default)]
-    diff_tool: DiffTool,
+    diff_tool: Option<DiffTool>,
 }
 
-// Reads diff_tool from config.toml in the plugin config dir
-// (`herdr plugin config-dir callstack`). A missing file means DiffNav.
-pub fn diff_tool(config_dir: Option<&Path>) -> Result<DiffTool> {
-    let Some(path) = config_dir.map(|dir| dir.join("config.toml")) else {
-        return Ok(DiffTool::default());
-    };
-    let text = match std::fs::read_to_string(&path) {
-        Ok(text) => text,
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(DiffTool::default()),
-        Err(e) => return Err(e).with_context(|| format!("Cannot read {}.", path.display())),
-    };
-    let config: Config =
-        toml::from_str(&text).with_context(|| format!("Invalid {}.", path.display()))?;
-    Ok(config.diff_tool)
+// diff_tool in config.toml in the plugin config dir
+// (`herdr plugin config-dir callstack`) wins. Without it, use the first of
+// DiffNav and lazygit that `installed` finds, else plain git diff.
+pub fn diff_tool(config_dir: Option<&Path>, installed: impl Fn(&str) -> bool) -> Result<DiffTool> {
+    let mut config = Config::default();
+    if let Some(path) = config_dir.map(|dir| dir.join("config.toml")) {
+        match std::fs::read_to_string(&path) {
+            Ok(text) => {
+                config =
+                    toml::from_str(&text).with_context(|| format!("Invalid {}.", path.display()))?
+            }
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+            Err(e) => return Err(e).with_context(|| format!("Cannot read {}.", path.display())),
+        }
+    }
+    Ok(config.diff_tool.unwrap_or(if installed("diffnav") {
+        DiffTool::Diffnav
+    } else if installed("lazygit") {
+        DiffTool::Lazygit
+    } else {
+        DiffTool::Git
+    }))
+}
+
+fn on_path(name: &str) -> bool {
+    env::var_os("PATH")
+        .is_some_and(|paths| env::split_paths(&paths).any(|dir| dir.join(name).is_file()))
 }
 
 pub fn diff_source() -> Result<()> {
@@ -245,6 +261,7 @@ pub fn diff_source() -> Result<()> {
         env::var_os("HERDR_PLUGIN_CONFIG_DIR")
             .as_deref()
             .map(Path::new),
+        on_path,
     )?;
     let source = source_path(Path::new(&project), &file)?;
     let result = Command::new("git")
@@ -262,10 +279,11 @@ pub fn diff_source() -> Result<()> {
         .strip_prefix(&git_root)
         .context("The file is outside the Git repository.")?;
     let error = match tool {
-        // The shell reads the user's dn alias. Source paths stay in environment
-        // variables, never in executable shell text. The alias's watch command is overridden.
+        // The shell reads the user's dn alias, falling back to plain diffnav.
+        // Source paths stay in environment variables, never in executable shell
+        // text. The alias's watch command is overridden.
         DiffTool::Diffnav => Command::new(env::var("SHELL").unwrap_or_else(|_| "/bin/zsh".into()))
-            .args(["-ic", "dn --watch-cmd \"$CALLSTACK_DIFF_COMMAND\""])
+            .args(["-ic", DIFFNAV_COMMAND])
             .env("CALLSTACK_DIFF_FILE", relative)
             .env("CALLSTACK_DIFF_COMMAND", DIFF_COMMAND)
             .current_dir(git_root)
@@ -276,10 +294,17 @@ pub fn diff_source() -> Result<()> {
             .arg(relative)
             .current_dir(git_root)
             .exec(),
+        // less keeps the pane open even when the diff is empty.
+        DiffTool::Git => Command::new("sh")
+            .args(["-c", GIT_COMMAND])
+            .env("CALLSTACK_DIFF_FILE", relative)
+            .current_dir(git_root)
+            .exec(),
     };
     Err(error).context(match tool {
         DiffTool::Diffnav => "Cannot start dn. Define dn in your interactive shell configuration.",
         DiffTool::Lazygit => "Cannot start lazygit. Check that lazygit is on PATH.",
+        DiffTool::Git => "Cannot start sh.",
     })
 }
 

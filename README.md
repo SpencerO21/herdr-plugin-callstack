@@ -61,7 +61,7 @@ Herdr agent. They do not start a new agent automatically.
 | Click a function | Up/Down or j/k | Select a call |
 | Click `[+]` or `[-]`, or Fold | Enter or Space | Expand or fold nested calls |
 | Double-click a function, or Open nvim | o | Open the source line in a new Neovim pane |
-| Diff | g | Open the selected file's changes in your diff tool (DiffNav or lazygit) |
+| Diff | g | Open the selected file's changes in DiffNav, lazygit, or git diff |
 | Prev / Next | Shift+Tab / Tab | Change flows |
 | Details / Hide details | d | Show types, conditions, and notes below the stack |
 | More / Back | m | Show or hide extra controls |
@@ -279,17 +279,18 @@ source line numbers automatically.
 ## Diff tool
 
 Click **Diff** or press `g` to open the selected file's diff in another pane.
-The tool is DiffNav unless the plugin config selects lazygit. Create
+Without configuration the plugin uses the first tool it finds on `PATH`:
+DiffNav, then lazygit, then plain `git diff` in `less`. To choose one, create
 `config.toml` in the directory printed by `herdr plugin config-dir callstack`:
 
 ```toml
-diff_tool = "lazygit" # or "diffnav" (default)
+diff_tool = "lazygit" # "diffnav", "lazygit", or "git"
 ```
 
 ### DiffNav
 
 The pane runs your interactive shell's `dn` command with a file-specific
-`--watch-cmd`. Define `dn` as an alias or function for DiffNav, for example:
+`--watch-cmd`, or `diffnav --watch` when `dn` is not defined. Define `dn` as an\nalias or function for DiffNav, for example:
 
 ```sh
 alias dn='diffnav --watch'
