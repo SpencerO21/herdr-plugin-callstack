@@ -605,3 +605,32 @@ fn diff_command_limits_paths_and_includes_local_edits() {
             .contains("-branch")
     );
 }
+
+#[test]
+fn diff_tool_config_wins_over_installed_tools() {
+    let temp = Temp::new();
+    let all = |_: &str| true;
+    let none = |_: &str| false;
+    let lazygit = |name: &str| name == "lazygit";
+    assert_eq!(host::diff_tool(None, all).unwrap(), host::DiffTool::Diffnav);
+    assert_eq!(
+        host::diff_tool(Some(&temp.0), lazygit).unwrap(),
+        host::DiffTool::Lazygit
+    );
+    assert_eq!(
+        host::diff_tool(Some(&temp.0), none).unwrap(),
+        host::DiffTool::Git
+    );
+    fs::write(temp.0.join("config.toml"), "diff_tool = \"git\"\n").unwrap();
+    assert_eq!(
+        host::diff_tool(Some(&temp.0), all).unwrap(),
+        host::DiffTool::Git
+    );
+    fs::write(temp.0.join("config.toml"), "# no tool chosen\n").unwrap();
+    assert_eq!(
+        host::diff_tool(Some(&temp.0), lazygit).unwrap(),
+        host::DiffTool::Lazygit
+    );
+    fs::write(temp.0.join("config.toml"), "diff_tool = \"meld\"\n").unwrap();
+    assert!(host::diff_tool(Some(&temp.0), all).is_err());
+}

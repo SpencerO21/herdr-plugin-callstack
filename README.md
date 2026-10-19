@@ -61,7 +61,7 @@ Herdr agent. They do not start a new agent automatically.
 | Click a function | Up/Down or j/k | Select a call |
 | Click `[+]` or `[-]`, or Fold | Enter or Space | Expand or fold nested calls |
 | Double-click a function, or Open nvim | o | Open the source line in a new Neovim pane |
-| Diff dn | g | Open the selected file's changes in DiffNav through `dn` |
+| Diff | g | Open the selected file's changes in DiffNav, lazygit, or git diff |
 | Prev / Next | Shift+Tab / Tab | Change flows |
 | Details / Hide details | d | Show types, conditions, and notes below the stack |
 | More / Back | m | Show or hide extra controls |
@@ -183,7 +183,7 @@ Click **Tree** to return to the nested call list. The diagrams need at least
   **Compact** uses smaller boxes. Press `z` to switch sizes.
 - Click a box to select it and show details below the diagram.
 - Double-click a box, or click **Open nvim**, to open its source.
-- Click **Diff dn** to open the selected version's file changes in DiffNav.
+- Click **Diff** to open the selected version's file changes in your diff tool.
 - Use the mouse wheel to move vertically. Shift+wheel moves horizontally
   when the terminal supplies the Shift modifier. Horizontal wheel events also work.
 - **More** has buttons for all movement directions, page movement, and **Center**.
@@ -276,11 +276,22 @@ the project folder saved at publication. It does not use a different viewer
 `--project` override. The plugin does not generate a corrected tree or move
 source line numbers automatically.
 
-## DiffNav
+## Diff tool
 
-Click **Diff dn** or press `g` to open the selected file's diff in another pane.
+Click **Diff** or press `g` to open the selected file's diff in another pane.
+Without configuration the plugin uses the first tool it finds on `PATH`:
+DiffNav, then lazygit, then plain `git diff` in `less`. To choose one, create
+`config.toml` in the directory printed by `herdr plugin config-dir callstack`:
+
+```toml
+diff_tool = "lazygit" # "diffnav", "lazygit", or "git"
+```
+
+### DiffNav
+
 The pane runs your interactive shell's `dn` command with a file-specific
-`--watch-cmd`. Define `dn` as an alias or function for DiffNav, for example:
+`--watch-cmd`, or `diffnav --watch` when `dn` is not defined. Define `dn` as an
+alias or function for DiffNav, for example:
 
 ```sh
 alias dn='diffnav --watch'
@@ -293,6 +304,13 @@ deleted files. Untracked files are not included by Git diff.
 DiffNav has no source-line jump option, so this opens the file's changes, not
 an exact function line. Your existing alias's watch command is overridden for
 this pane only. Your shell configuration is not changed.
+
+### lazygit
+
+The pane runs `lazygit --filter <file>` from the repository root. Filter mode
+limits the commit log to the selected file. lazygit has no merge-base diff
+option, so it shows the file's history and working-tree changes instead of the
+single `origin/main` comparison DiffNav uses.
 
 ## Storage and compatibility
 

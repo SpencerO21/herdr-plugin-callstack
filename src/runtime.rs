@@ -167,7 +167,7 @@ fn job(effect: Effect, store: Store, tx: Sender<Message>) {
                 host::open_source(&project, &loc).map(|_| "Opened the source in Neovim.".into())
             }
             Effect::Diff(project, loc) => {
-                host::open_diff(&project, &loc).map(|_| "Opened the file diff through dn.".into())
+                host::open_diff(&project, &loc).map(|_| "Opened the file diff.".into())
             }
             Effect::Delete(name) => store
                 .delete(&name)
