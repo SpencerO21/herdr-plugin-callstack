@@ -290,7 +290,8 @@ diff_tool = "lazygit" # "diffnav", "lazygit", or "git"
 ### DiffNav
 
 The pane runs your interactive shell's `dn` command with a file-specific
-`--watch-cmd`, or `diffnav --watch` when `dn` is not defined. Define `dn` as an\nalias or function for DiffNav, for example:
+`--watch-cmd`, or `diffnav --watch` when `dn` is not defined. Define `dn` as an
+alias or function for DiffNav, for example:
 
 ```sh
 alias dn='diffnav --watch'
